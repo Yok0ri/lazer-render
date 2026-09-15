@@ -1,0 +1,59 @@
+# Build
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+*.log
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.DotSettings.user
+.vs/
+.idea/
+.zed/
+*.swp
+
+# NuGet
+*.nupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / coverage
+[Tt]est[Rr]esult*/
+[Cc]overage/
+*.coverage
+*.coveragexml
+
+# Tool output
+videos/
+captures/
+*.mp4
+*.mkv
+*.webm
+
+# Local secrets / machine paths
+*.local.json
+.env
+
+# Private working notes (AI advice, progress reports, task prompts).
+# Documented as "not shipped" in ARCHITECTURE.md; excluded per ROADMAP Phase 8.5.
+dev/
+
+# LazerRender runtime data (web service storage + engine realm/ini/db)
+# Never commit these: they hold the SQLite DB, the Data Protection key ring,
+# lazer's Realm database and its config (which can transiently hold the
+# injected osu! token).
+data/
+keys/
+uploads/
+jobs/
+results/
+publish/
+storage/

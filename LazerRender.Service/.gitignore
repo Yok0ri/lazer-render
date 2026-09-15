@@ -1,0 +1,9 @@
+# Runtime data (database, uploads, job work dirs, results, secrets)
+data/
+uploads/
+jobs/
+results/
+keys/
+appsettings.Local.json
+*.env
+deploy/*.env

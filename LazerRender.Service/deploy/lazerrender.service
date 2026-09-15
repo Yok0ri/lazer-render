@@ -1,0 +1,29 @@
+[Unit]
+Description=LazerRender web service
+Documentation=https://github.com/ppy/osu
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lazerrender
+Group=lazerrender
+WorkingDirectory=/opt/lazerrender
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_CONTENTROOT=/opt/lazerrender
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5080
+EnvironmentFile=/opt/lazerrender/lazerrender.env
+ExecStart=/opt/lazerrender/LazerRender.Api
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the self-contained app only needs to write its runtime data and DPAPI keys.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/lazerrender/data /opt/lazerrender/keys
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

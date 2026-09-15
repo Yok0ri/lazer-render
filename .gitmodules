@@ -1,0 +1,3 @@
+[submodule "LazerRender.Game/extern/osu"]
+	path = LazerRender.Game/extern/osu
+	url = https://github.com/ppy/osu.git

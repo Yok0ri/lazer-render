@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>LazerRender</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">LazerRender</div>
+    <nav id="nav" class="tabs" hidden aria-label="Primary">
+      <button class="tab active" data-tab="render" type="button">Render</button>
+      <button class="tab" data-tab="jobs" type="button">Jobs</button>
+      <button class="tab" data-tab="skins" type="button">Skins</button>
+      <button class="tab" data-tab="admin" id="admin-tab" type="button" hidden>Admin</button>
+    </nav>
+    <div id="user-area"></div>
+  </header>
+
+  <main>
+    <section id="login-panel" class="login-wrap" hidden>
+      <div class="card login-card">
+        <h1>LazerRender</h1>
+        <p class="muted">Sign in with your osu! account to render replays.</p>
+        <a class="btn primary" href="/auth/login">Log in with osu!</a>
+      </div>
+    </section>
+
+    <section id="app" hidden>
+      <!-- RENDER -->
+      <section id="tab-render" class="tab-panel">
+        <div class="two-col">
+          <form id="render-form" class="card">
+            <div class="card-head">
+              <h2>New render</h2>
+            </div>
+
+            <label class="field">
+              <span>Replay file (.osr)</span>
+              <input type="file" id="replay-file" accept=".osr" required />
+              <p class="muted" id="replay-meta"></p>
+            </label>
+
+            <details class="group" open>
+              <summary>Basic</summary>
+              <div class="row">
+                <label class="field">
+                  <span>Resolution</span>
+                  <select id="resolution" data-reset>
+                    <option value="1280x720">1280 × 720</option>
+                    <option value="1920x1080">1920 × 1080</option>
+                    <option value="2560x1440">2560 × 1440</option>
+                    <option value="3840x2160">3840 × 2160</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Frame rate</span>
+                  <select id="fps" data-reset>
+                    <option value="30">30 fps</option>
+                    <option value="60">60 fps</option>
+                    <option value="90">90 fps</option>
+                    <option value="120">120 fps</option>
+                  </select>
+                </label>
+              </div>
+              <div class="row">
+                <label class="field">
+                  <span>Skin</span>
+                  <select id="skin-select" data-reset>
+                    <option value="">Default (argon pro)</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Motion blur</span>
+                  <select id="motion-blur" data-reset>
+                    <option value="0">Off</option>
+                    <option value="3">Light (3)</option>
+                    <option value="5">Heavy (5)</option>
+                  </select>
+                </label>
+              </div>
+              <div class="checks">
+                <label class="check"><input type="checkbox" id="disable-result-screen" data-reset /> Disable result screen</label>
+              </div>
+            </details>
+
+            <details class="group">
+              <summary>Background</summary>
+              <label class="range"><span>Background dim <output id="dim-out"></output></span><input type="range" id="dim-level" min="0" max="1" step="0.01" data-reset /></label>
+              <label class="range"><span>Background blur <output id="blur-out"></output></span><input type="range" id="blur-level" min="0" max="1" step="0.01" data-reset /></label>
+              <label class="range"><span>Parallax <output id="parallax-out"></output></span><input type="range" id="parallax" min="0" max="2" step="0.01" data-reset /></label>
+              <label class="range"><span>Combo colour normalisation <output id="ccn-out"></output></span><input type="range" id="combo-colour-normalisation" min="0" max="1" step="0.01" data-reset /></label>
+              <div class="checks">
+                <label class="check"><input type="checkbox" id="storyboard" data-reset /> Storyboard</label>
+                <label class="check"><input type="checkbox" id="video" data-reset /> Background video</label>
+                <label class="check"><input type="checkbox" id="beatmap-skins" data-reset /> Beatmap skins</label>
+                <label class="check"><input type="checkbox" id="beatmap-colours" data-reset /> Beatmap colours</label>
+              </div>
+            </details>
+
+            <details class="group">
+              <summary>Gameplay</summary>
+              <label class="range"><span>Cursor size <output id="cursor-size-out"></output></span><input type="range" id="cursor-size" min="0.1" max="2" step="0.01" data-reset /></label>
+              <label class="range"><span>Replay analysis length <output id="ral-out"></output></span><input type="range" id="replay-analysis-length" min="200" max="2000" step="50" data-reset /></label>
+              <label class="field">
+                <span>Playfield border</span>
+                <select id="playfield-border" data-reset>
+                  <option value="none">None</option>
+                  <option value="corners">Corners</option>
+                  <option value="full">Full</option>
+                </select>
+              </label>
+              <div class="checks">
+                <label class="check"><input type="checkbox" id="snaking-in" data-reset /> Snaking in</label>
+                <label class="check"><input type="checkbox" id="snaking-out" data-reset /> Snaking out</label>
+                <label class="check"><input type="checkbox" id="hit-animations" data-reset /> Hit animations</label>
+                <label class="check"><input type="checkbox" id="hit-lighting" data-reset /> Hit lighting</label>
+                <label class="check"><input type="checkbox" id="cursor-trail" data-reset /> Cursor trail</label>
+                <label class="check"><input type="checkbox" id="cursor-ripples" data-reset /> Cursor ripples</label>
+                <label class="check"><input type="checkbox" id="hide-gameplay-cursor" data-reset /> Hide gameplay cursor</label>
+                <label class="check"><input type="checkbox" id="show-click-markers" data-reset /> Click markers</label>
+                <label class="check"><input type="checkbox" id="show-frame-markers" data-reset /> Frame markers</label>
+                <label class="check"><input type="checkbox" id="show-cursor-path" data-reset /> Cursor path</label>
+              </div>
+            </details>
+
+            <details class="group">
+              <summary>HUD</summary>
+              <label class="field">
+                <span>HUD visibility</span>
+                <select id="hud-visibility" data-reset>
+                  <option value="always">Always visible</option>
+                  <option value="hiddengameplay">Hidden during gameplay</option>
+                  <option value="never">Never visible</option>
+                </select>
+              </label>
+              <label class="range"><span>HUD scale <output id="hud-scale-out"></output></span><input type="range" id="hud-scale" min="0.5" max="2" step="0.05" data-reset /></label>
+              <div class="hud-head">
+                <p class="muted hint">HUD elements</p>
+                <label class="hud-master" title="Select or deselect every HUD element">
+                  <input type="checkbox" id="hud-master" />
+                  <span>All</span>
+                </label>
+              </div>
+              <div id="hud-only-list">
+                <div class="checks hud-group">
+                  <label class="check"><input type="checkbox" id="hud-only-hp" data-reset checked /> Health bar</label>
+                  <label class="check"><input type="checkbox" id="hud-only-combo" data-reset checked /> Combo</label>
+                  <label class="check"><input type="checkbox" id="hud-only-score" data-reset checked /> Score</label>
+                  <label class="check"><input type="checkbox" id="hud-only-keyoverlay" data-reset checked /> Key overlay</label>
+                  <label class="check"><input type="checkbox" id="hud-only-accuracy" data-reset checked /> Accuracy</label>
+                  <label class="check"><input type="checkbox" id="hud-only-pp" data-reset checked /> PP counter</label>
+                  <label class="check"><input type="checkbox" id="hud-only-hiterror" data-reset checked /> Hit error meter</label>
+                  <label class="check"><input type="checkbox" id="hud-only-song-progress" data-reset checked /> Song progress</label>
+                  <label class="check"><input type="checkbox" id="hud-only-unstable-rate" data-reset checked /> Unstable rate</label>
+                  <label class="check"><input type="checkbox" id="hud-only-judgements" data-reset checked /> Hit counter</label>
+                  <label class="check"><input type="checkbox" id="hud-only-mods" data-reset checked /> Mods</label>
+                  <label class="check"><input type="checkbox" id="hud-only-aim-error" data-reset checked /> Aim error meter</label>
+                </div>
+                <div class="checks hud-group">
+                  <label class="check"><input type="checkbox" id="hud-only-rank" data-reset checked /> Rank</label>
+                  <label class="check"><input type="checkbox" id="hud-only-longest-combo" data-reset checked /> Longest combo</label>
+                  <label class="check"><input type="checkbox" id="hud-only-scoreboard" data-reset checked /> Scoreboard</label>
+                  <label class="check"><input type="checkbox" id="hud-only-bpm" data-reset checked /> BPM</label>
+                  <label class="check"><input type="checkbox" id="hud-only-cps" data-reset checked /> Clicks per second</label>
+                  <label class="check"><input type="checkbox" id="hud-only-player-name" data-reset checked /> Player name</label>
+                  <label class="check"><input type="checkbox" id="hud-only-avatar" data-reset checked /> Avatar</label>
+                  <label class="check"><input type="checkbox" id="hud-only-flags" data-reset checked /> Flags</label>
+                  <label class="check"><input type="checkbox" id="hud-only-spectators" data-reset checked /> Spectator list</label>
+                </div>
+                <div class="checks hud-group">
+                  <label class="check"><input type="checkbox" id="hud-only-cosmetic" data-reset checked /> Cosmetic elements</label>
+                </div>
+              </div>
+            </details>
+
+            <details class="group">
+              <summary>Audio</summary>
+              <label class="check"><input type="checkbox" id="beatmap-hitsounds" data-reset /> Beatmap hitsounds</label>
+            </details>
+
+            <div class="presets-row">
+              <button type="button" class="btn" id="preset-save">Save preset</button>
+              <button type="button" class="btn" id="preset-load">Load preset</button>
+              <div id="presets-list" class="presets-list" hidden></div>
+            </div>
+
+            <button type="submit" class="btn primary wide" id="submit-btn">Queue render</button>
+            <p id="form-status" class="muted" role="status"></p>
+          </form>
+
+          <section class="card" id="jobs-card">
+            <div class="card-head">
+              <h2>Recent renders</h2>
+            </div>
+            <div id="jobs-list" class="jobs-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- JOBS -->
+      <section id="tab-jobs" class="tab-panel" hidden>
+        <div class="card">
+          <h2>Your renders</h2>
+          <div id="jobs-list-full"></div>
+        </div>
+      </section>
+
+      <!-- SKINS -->
+      <section id="tab-skins" class="tab-panel" hidden>
+        <div class="two-col">
+          <form id="skin-form" class="card">
+            <h2>Import a skin</h2>
+            <label class="field">
+              <span>Skin archive (.osk)</span>
+              <input type="file" id="skin-file" accept=".osk" required />
+            </label>
+            <button type="submit" class="btn primary wide">Import skin</button>
+            <p id="skin-status" class="muted" role="status"></p>
+          </form>
+          <section class="card">
+            <h2>Imported skins</h2>
+            <div id="skins-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ADMIN -->
+      <section id="tab-admin" class="tab-panel" hidden>
+        <div class="two-col">
+          <section class="card">
+            <h2>Queue</h2>
+            <p id="queue-stats" class="muted"></p>
+            <div class="row">
+              <button class="btn" data-purge="skins" type="button">Purge skins</button>
+              <button class="btn" data-purge="beatmaps" type="button">Purge beatmaps</button>
+              <button class="btn" data-purge="all" type="button">Purge all</button>
+            </div>
+          </section>
+          <section class="card">
+            <h2>Allow a user</h2>
+            <form id="allow-form" class="row-end">
+              <label class="field">
+                <span>osu! user ID</span>
+                <input type="number" id="allow-id" placeholder="e.g. 7562902" />
+              </label>
+              <label class="field">
+                <span>or username</span>
+                <input type="text" id="allow-name" placeholder="e.g. peppy" />
+              </label>
+              <button type="submit" class="btn primary">Allow</button>
+            </form>
+            <p id="allow-status" class="muted" role="status"></p>
+          </section>
+        </div>
+        <section class="card">
+          <h2>Render PC</h2>
+          <p id="encoder-info" class="muted">Detecting encoder…</p>
+        </section>
+        <section class="card">
+          <h2>Users</h2>
+          <div id="users-list"></div>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

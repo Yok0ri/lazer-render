@@ -1,0 +1,6 @@
+# Reverse-proxy example for the LazerRender web service.
+# The API listens on 127.0.0.1:5080 (see lazerrender.service); Caddy terminates TLS.
+render.example.com {
+    reverse_proxy 127.0.0.1:5080
+    encode gzip
+}
