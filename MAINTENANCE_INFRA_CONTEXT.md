@@ -1,13 +1,19 @@
 # MAINTENANCE_INFRA_CONTEXT.md
 
-**Purpose.** This document is the map and raw material for designing LazerRender's maintenance
-infrastructure and debugging workflow (Roadmap Phase 8, §8.2), which culminates in a real
-`MAINTENANCE.md`. It is written to be read **instead of** cloning and re-deriving the architecture.
+**Purpose.** This document is the map and raw material for designing LazerRender's maintenance and
+observability infrastructure (Roadmap Phase 8: §8.2 logging & instrumentation core, §8.3 admin
+observability panel, §8.4 `MAINTENANCE.md` + debug workflow docs). It is written to be read **instead
+of** cloning and re-deriving the architecture.
 
 **Audience.** A skilled engineer who has never seen this repo. Prioritise file paths, code excerpts and
 concrete fragility points over general explanation. Where something is unverified, it is marked as such.
 
 **Repo root (project-relative, as referenced throughout):** `lazer-render/`
+
+**Baseline.** Line numbers, paths and code excerpts refer to commit `28072c17` ("Initial commit:
+LazerRender headless replay recorder and web service", 106 files). Runtime data (`storage/`, `data/`,
+`keys/`), build output, editor config and the private `dev/` notes are gitignored and are not part of the
+tracked tree.
 
 **Current state of `MAINTENANCE.md`** — it exists and is a one-line placeholder:
 
@@ -26,10 +32,12 @@ So there is **no** existing maintenance workflow to preserve; this is greenfield
 ```
 lazer-render/
 ├── README.md                     user-facing overview
-├── ROADMAP.md                    phased plan (Phase 8.2 is this task)
+├── ROADMAP.md                    phased plan (Phases 8.2-8.4 are this task)
 ├── ARCHITECTURE.md               the authoritative deep-dive (Part 2 engine, Part 3 service)
 ├── MAINTENANCE.md                placeholder (the deliverable)
 ├── SECURITY_AUDIT_CONTEXT.md     sibling briefing (Phase 7 audit)
+├── MAINTENANCE_INFRA_CONTEXT.md  this document (Phase 8 design input)
+├── .gitignore                    excludes runtime data, dev/ notes, editor config
 ├── LazerRender.sln               ENGINE solution (references LazerRender.Game)
 ├── .gitmodules                   pins LazerRender.Game/extern/osu
 │
@@ -76,7 +84,7 @@ lazer-render/
 │   │       ├── wwwroot/               SPA: index.html, app.js, styles.css (NO BUILD STEP)
 │   │       └── appsettings.json / appsettings.Development.json / Properties/launchSettings.json
 │   └── tests/LazerRender.Worker.Tests/   xunit (32 tests currently passing)
-└── (gitignored) storage/, data/, keys/, bin/, obj/, out/, LazerRender.Service/publish/
+└── (gitignored) storage/, data/, keys/, dev/, .zed/, bin/, obj/, out/, *.log, LazerRender.Service/publish/
 ```
 
 ### 1.2 How the halves relate
@@ -378,7 +386,7 @@ Release engine binary (currently it does not).
 
 ---
 
-## 4. The Phase 7 admin control panel (current capabilities)
+## 4. The admin control panel (current capabilities — the basis for Phase 8.3)
 
 ### 4.1 Where it lives
 
@@ -440,7 +448,7 @@ Cards inside `#tab-admin`:
    ```
 
    `MetaController.Capabilities` returns `{ encoder, autoDetected }` from `EncoderResolver`.
-   This is the anchor for Roadmap §7.1's planned CPU/GPU/RAM/FFmpeg/runtime summary.
+   This is the anchor for Roadmap §8.3's planned CPU/GPU/RAM/FFmpeg/runtime summary.
 
 The admin panel is refreshed on a timer (`state.adminTimer`, every 15 s) and on tab init.
 
@@ -457,8 +465,8 @@ The admin panel is refreshed on a timer (`state.adminTimer`, every 15 s) and on 
 - The engine's stdout/stderr **is already captured** by `RendererProcessRunner` and classified — see
   §6.3 — but it is only forwarded to the service's `ILogger` and then discarded.
 
-So Phase 8's debugging workflow and Phase 7.1's console-logs panel both start from zero UI-wise, but the
-**classification logic already exists and should be reused** (Roadmap §7.1 and §8.2 both say so).
+So the §8.2 debug workflow and the §8.3 console-logs panel both start from zero UI-wise, but the
+**classification logic already exists and should be reused** (Roadmap §8.2 and §8.3 both say so).
 `RendererProcessRunner.logEngineLine` is the natural single choke point for a tee/ring-buffer.
 
 ---
@@ -574,8 +582,8 @@ Engine **stdout** at the same time carries the machine-readable contract (not lo
 
   Both the progress reader task (`source = "stdout"`) and the stderr drain task (`source = "stderr"`)
   feed this method, and both are awaited before the run result is returned (deliberately, so the tail of
-  the engine log is not lost). **This three-level classification is exactly what Roadmap §7.1's console
-  logs and §8.2's debug workflow should share** rather than reimplement.
+  the engine log is not lost). **This three-level classification is exactly what Roadmap §8.2's pipeline,
+  §8.3's console logs and the debug workflow should share** rather than reimplement.
 
 - Console log level configuration — `appsettings.json`:
   ```json
@@ -628,7 +636,7 @@ Engine **stdout** at the same time carries the machine-readable contract (not lo
    API to the engine.
 4. The §5 table above, reading each cited site — these are the rebase-repair targets.
 5. `LazerRender.Service/src/LazerRender.Api/Services/RendererProcessRunner.cs` — the log bridge and the
-   classification you should reuse for both Phase 7.1 and Phase 8.2.
+   classification to reuse for Phase 8.2, 8.3 and 8.4.
 6. `wwwroot/index.html` + `wwwroot/app.js` (`initAdmin`, `refreshAdmin`, `loadCapabilities`) and
    `Controllers/AdminController.cs` + `Controllers/MetaController.cs` — the panel to extend.
 7. `LazerRender.Game/scripts/run-headless.sh` — where a debug/release decision and a debug env var would

@@ -1,20 +1,26 @@
 # SECURITY_AUDIT_CONTEXT.md
 
-**Purpose.** This document is a map plus evidence for a security audit of LazerRender (Roadmap Phase 7,
-security-audit portion only — *not* §7.1 admin-panel expansion). It is written to be read **instead of**
-cloning the repo. Every claim below is grounded in a file path and, where it matters, the actual code.
+**Purpose.** This document is a map plus evidence for a security audit of LazerRender (Roadmap Phase 7 —
+the audit itself, and the §7.1 hardening backlog it produces; the admin observability panel is §8.3 and
+out of scope). It is written to be read **instead of** cloning the repo. Every claim below is grounded in
+a file path and, where it matters, the actual code.
 
 **Auditor expectations.** Assume you are a skilled reviewer. Prose is deliberately minimal; file paths
 and code excerpts are the payload. Where a snippet is small or security-relevant, it is pasted in full.
-Line numbers are from the state of the tree at the time of writing (no commits exist yet — the entire
-repo is a single staged initial commit).
+
+**Baseline.** Line numbers, paths and code excerpts refer to commit `28072c17` ("Initial commit:
+LazerRender headless replay recorder and web service", 106 files) — the tree this briefing was written
+against. Runtime data (`storage/`, `data/`, `keys/`; ~425 MB, and the engine's Realm/ini files can
+transiently hold the injected token), build output, editor config and the private `dev/` notes are
+excluded from that commit via `.gitignore`: they exist on a real render host but are not part of the
+tracked tree.
 
 **Repo root (project-relative, as referenced throughout):** `lazer-render/`
 
 **Document scope / non-goals for this file**
 
 - ✅ Authn/authz, tokens/credentials, outbound network, IPC/process boundaries, filesystem, user input.
-- ❌ Admin-panel feature expansion (that is Roadmap §7.1, a separate task).
+- ❌ Admin-panel and observability UI work (that is Roadmap §8.3, a separate task).
 - ❌ Performance, correctness, or rendering-quality review.
 - ❌ The `dev/` directory (historical prompts/reports, not shipped) and `LazerRender.Game/extern/osu`
   (the pinned upstream `ppy/osu` submodule — third-party code, not ours to harden).
@@ -228,7 +234,7 @@ Relevant configuration defaults, `LazerRender.Service/src/LazerRender.Api/appset
 ```
 
 > Note for the auditor: a **real osu! user id (11566111) is hard-coded** as an admin in the committed
-> `appsettings.json`. Decide whether that is acceptable for the public release (Phase 8 §8.3 also asks
+> `appsettings.json`. Decide whether that is acceptable for the public release (Phase 8.5 also asks
 > for a "published tree contains no personal leftovers" check).
 
 Logout (`AuthController.Logout`) calls `auth.RemoveRefreshTokenAsync(userId, ct)` (deletes the encrypted
@@ -332,8 +338,10 @@ public sealed class OAuthTokenEntity
 
 > **Key-ring exposure:** the Data Protection key ring is a plaintext-wrapped directory at
 > `{contentRoot}/keys` with no DPAPI/KeyVault/Certificate protection. Anyone who reads that directory
-> can decrypt every stored refresh token. The directory is not listed in `.gitignore`-verified terms
-> here — the auditor should confirm it is never committed or shipped in a container image layer.
+> can decrypt every stored refresh token. It is **gitignored** (both `.gitignore` files ignore `keys/`)
+> and excluded from the baseline commit, so the exposure is at-rest/on-host rather than in source
+> control: the auditor should confirm the key ring is not baked into a container image layer and is not
+> weakly permissioned on the render host.
 
 #### 2.2.3 Supplying the engine with the queuing player's token
 
@@ -900,7 +908,9 @@ it cannot traverse. Files are deleted in a `finally` block.
 
 Engine config (including the injected osu! token, §2.2.6) and Realm DB live under the engine storage
 directory. The service points the engine there via `--storage <RealmDirectory>`. That directory is the
-shared Realm DB for beatmaps/skins, so it is both a data store and (transiently) a secret store.
+shared Realm DB for beatmaps/skins, so it is both a data store and (transiently) a secret store. It is
+gitignored and excluded from the baseline commit; on a real render host it holds `client*.realm`,
+`game.ini` / `game.dev.ini` and `online.db`.
 
 #### 2.5.4 The engine CLI has no auth
 
@@ -1291,7 +1301,7 @@ These are flagged honestly so the auditor can prioritise. Some are known gaps ra
     - the engine CLI has no auth by design;
     - `--download-missing` deliberately fetches from public mirrors;
     - `MapMetadataService` passes a validated 32-hex MD5 as an argument;
-    - `dev/` is historical and not shipped.
+    - `dev/` is historical, gitignored and not shipped.
 
 ---
 
@@ -1466,7 +1476,7 @@ These are intentional design properties of a local/offline-capable single-operat
    (`Environment.GetEnvironmentVariable("LAZERRENDER_FLATFILL") == "1"` in `LazerRenderGame.cs`).
 7. **`GetBeatmapCache` / `ListSkins` / `ListPresets` are read-only** and shared-library by design.
 8. **Swagger is Development-only.** Do not flag its presence in the source.
-9. **`dev/`** (historical prompts and reports) is not part of the shipped product.
+9. **`dev/`** (historical prompts and reports) is gitignored and is not part of the shipped product.
 10. **The `extern/osu` submodule** is upstream third-party code. Auditing ppy's codebase is out of scope;
     audit only how *we* call into it (reflection, config injection, API endpoints).
 

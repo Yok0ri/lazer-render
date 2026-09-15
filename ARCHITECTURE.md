@@ -53,6 +53,9 @@ LazerRender/
 ├── ROADMAP.md                       Phased development plan
 ├── ARCHITECTURE.md                  This file (engine + service)
 ├── MAINTENANCE.md                   Routine-workflow notes (WIP)
+├── SECURITY_AUDIT_CONTEXT.md        Hand-off briefing for the Phase 7 security audit
+├── MAINTENANCE_INFRA_CONTEXT.md     Hand-off briefing for the Phase 8 observability design
+├── .gitignore                       Excludes runtime data, dev/ notes and editor config
 ├── .gitmodules                      Pins LazerRender.Game/extern/osu
 ├── LazerRender.Game/                The engine — self-contained, expanded in 2.2
 ├── LazerRender.Service/             The web service — self-contained, expanded in 3.3

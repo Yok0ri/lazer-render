@@ -304,7 +304,7 @@ The authoritative plan is [`ROADMAP.md`](ROADMAP.md). Status at a glance:
 | 5 | The web API daemon | ✅ completed |
 | 6 | Render & web UX refinements | ✅ completed |
 | 7 | Security audit & hardening | ⬜ planned |
-| 8 | Docker, maintenance infrastructure & release | ⬜ planned |
+| 8 | Docker, observability & release | ⬜ planned |
 | 9 | New features (replay viewer, strain graph) | ⬜ planned |
 
 The `Phase N status` sections below are a chronological record of engine work — a few later-phase
