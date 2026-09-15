@@ -15,17 +15,20 @@ public sealed class AssetsController : ControllerBase
     private readonly StorageService storage;
     private readonly AssetImportRunner importer;
     private readonly AppDbContext db;
+    private readonly QuotaService quota;
     private readonly ILogger<AssetsController> logger;
 
     public AssetsController(
         StorageService storage,
         AssetImportRunner importer,
         AppDbContext db,
+        QuotaService quota,
         ILogger<AssetsController> logger)
     {
         this.storage = storage;
         this.importer = importer;
         this.db = db;
+        this.quota = quota;
         this.logger = logger;
     }
 
@@ -58,6 +61,12 @@ public sealed class AssetsController : ControllerBase
 
         try
         {
+            // The package is expanded by the engine's third-party parsers, which run in the process
+            // holding the GPU context and the render credentials. Reject implausible archives first.
+            string? archiveError = ArchiveGuard.Validate(tempPath, file.Length);
+            if (archiveError is not null)
+                return BadRequest(new { error = "invalid_archive", detail = archiveError });
+
             await importer.RunAsync(new[] { "--import-skin", tempPath, "--storage", storage.RealmDirectory }, ct);
         }
         catch (AssetImportBusyException)
@@ -92,17 +101,36 @@ public sealed class AssetsController : ControllerBase
         return Ok(skins);
     }
 
+    /// <summary>
+    /// Deletes a skin. Skins are a shared library, so every authenticated user may see them, but only
+    /// the user who uploaded one (or an admin) may delete it. The engine's Realm copy is not removed —
+    /// there is no per-skin engine delete — so it stays until `--purge skins`.
+    /// </summary>
     [HttpDelete("skins/{id}")]
     public async Task<IActionResult> DeleteSkin(string id, CancellationToken ct)
     {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (userId is null)
+            return Unauthorized();
+
         var skin = await db.Skins.SingleOrDefaultAsync(s => s.Id == id, ct);
         if (skin is null)
             return NotFound(new { error = "not_found" });
+
+        if (!MayDelete(skin, userId, User.IsInRole("admin")))
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = "not_owner" });
 
         db.Skins.Remove(skin);
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
+
+    /// <summary>
+    /// Whether <paramref name="userId"/> may delete <paramref name="skin"/>: the uploader, or any admin.
+    /// Exposed for tests.
+    /// </summary>
+    internal static bool MayDelete(SkinEntity skin, string userId, bool isAdmin) =>
+        isAdmin || skin.UploadedBy == userId;
 
     [HttpPost("beatmaps")]
     public async Task<IActionResult> UploadBeatmap(CancellationToken ct)
@@ -118,6 +146,15 @@ public sealed class AssetsController : ControllerBase
             return BadRequest(new { error = "invalid_extension", detail = "Only .osz/.osu beatmap files are accepted." });
         }
 
+        if (file.Length > quota.MaxBeatmapBytes)
+        {
+            return BadRequest(new
+            {
+                error = "file_too_large",
+                detail = $"Beatmap package exceeds the {quota.MaxBeatmapBytes / (1024 * 1024)} MB limit.",
+            });
+        }
+
         var tempPath = Path.Combine(storage.UploadsDirectory, $"{Guid.NewGuid():N}{Path.GetExtension(name)}");
 
         await using (var target = System.IO.File.Create(tempPath))
@@ -127,6 +164,14 @@ public sealed class AssetsController : ControllerBase
 
         try
         {
+            // Only .osz is an archive; a bare .osu file is parsed directly by the engine.
+            if (name.EndsWith(".osz", StringComparison.OrdinalIgnoreCase))
+            {
+                string? archiveError = ArchiveGuard.Validate(tempPath, file.Length);
+                if (archiveError is not null)
+                    return BadRequest(new { error = "invalid_archive", detail = archiveError });
+            }
+
             await importer.RunAsync(new[] { "--import-map", tempPath, "--storage", storage.RealmDirectory }, ct);
         }
         catch (AssetImportBusyException)

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using LazerRender.Api.Configuration;
 using LazerRender.Contracts;
 using Microsoft.Extensions.Hosting;
@@ -18,9 +19,12 @@ public sealed record RenderInvocation(
     string StorageDirectory,
     string Encoder,
     bool DownloadMissing,
-    string? AvatarApiKey,
-    string? OsuUserToken,
-    long OsuUserTokenExpiresIn);
+    // Path to the owner-only secrets document handed to the engine (--secrets-file), or null when the
+    // render needs no osu! credentials. The credential itself is never an argument, so it cannot be
+    // read from the process command line.
+    string? SecretsFilePath,
+    // The credential values, held in-process only, so the log bridge can redact an accidental echo.
+    IReadOnlyList<string> RedactedValues);
 
 public sealed record RenderRunResult(bool Success, int ExitCode, bool Cancelled);
 
@@ -49,6 +53,22 @@ public sealed class RendererProcessRunner
     {
         "error", "exception", "failed", "failure", "unhandled", "fatal", "crash", "denied",
     };
+
+    /// <summary>Catches a credential in a shape we were not handed explicitly.</summary>
+    private static readonly Regex BearerPattern = new(
+        @"\bBearer\s+[^\s""']+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Upper bound on a single forwarded engine log line.</summary>
+    private const int MaxLoggedLineLength = 2000;
+
+    /// <summary>
+    /// Upper bound on how much engine output one render may push into the service log. Engine output is
+    /// derived from user-supplied inputs (replay usernames, beatmap metadata, uploaded archives), so a
+    /// broken or adversarial upload could otherwise emit unbounded text into the log.
+    /// </summary>
+    private const long MaxLoggedBytesPerRun = 256 * 1024;
+
     private const int SigTerm = 15;
     private const int SigKill = 9;
 
@@ -91,6 +111,7 @@ public sealed class RendererProcessRunner
         process.Start();
 
         var doneSeen = false;
+        var logBudget = new LogBudget(MaxLoggedBytesPerRun);
 
         var progressTask = Task.Run(async () =>
         {
@@ -98,7 +119,7 @@ public sealed class RendererProcessRunner
             {
                 if (!TryParseProgress(line, out var progress))
                 {
-                    logEngineLine("stdout", line);
+                    logEngineLine("stdout", line, invocation.RedactedValues, logBudget);
                     continue;
                 }
 
@@ -115,7 +136,7 @@ public sealed class RendererProcessRunner
         var stderrTask = Task.Run(async () =>
         {
             while (await process.StandardError.ReadLineAsync() is { } line)
-                logEngineLine("stderr", line);
+                logEngineLine("stderr", line, invocation.RedactedValues, logBudget);
         }, CancellationToken.None);
 
         bool cancelled = false;
@@ -159,11 +180,30 @@ public sealed class RendererProcessRunner
     /// <summary>
     /// Forwards one line of the engine's own log to the service log. Notable lines are visible at the
     /// default level; the engine's framework chatter is kept at Debug so it does not drown the log.
+    /// Credential values are redacted first, the line is length-capped, and the whole render shares a
+    /// byte budget so a misbehaving engine cannot fill the log.
     /// </summary>
-    private void logEngineLine(string source, string line)
+    private void logEngineLine(string source, string line, IReadOnlyList<string> secrets, LogBudget budget)
     {
         if (string.IsNullOrWhiteSpace(line))
             return;
+
+        line = Redact(line, secrets);
+
+        if (line.Length > MaxLoggedLineLength)
+            line = string.Concat(line.AsSpan(0, MaxLoggedLineLength), "…[truncated]");
+
+        if (!budget.TryReserve(line.Length))
+        {
+            if (budget.NotifyExhaustedOnce())
+            {
+                logger.LogWarning(
+                    "[engine/{Source}] further engine output suppressed for this render (budget {Budget} bytes reached).",
+                    source, MaxLoggedBytesPerRun);
+            }
+
+            return;
+        }
 
         if (problemEngineMarkers.Any(m => line.Contains(m, StringComparison.OrdinalIgnoreCase)))
             logger.LogWarning("[engine/{Source}] {Line}", source, line);
@@ -171,6 +211,34 @@ public sealed class RendererProcessRunner
             logger.LogInformation("[engine/{Source}] {Line}", source, line);
         else
             logger.LogDebug("[engine/{Source}] {Line}", source, line);
+    }
+
+    /// <summary>
+    /// Replaces every known credential value with a marker, and masks anything that looks like a bearer
+    /// token, so a credential can never reach the log.
+    /// </summary>
+    internal static string Redact(string line, IReadOnlyList<string> secrets)
+    {
+        foreach (string secret in secrets)
+        {
+            if (!string.IsNullOrEmpty(secret))
+                line = line.Replace(secret, "[redacted]", StringComparison.Ordinal);
+        }
+
+        return BearerPattern.Replace(line, "Bearer [redacted]");
+    }
+
+    /// <summary>Per-render byte budget for forwarded engine output.</summary>
+    private sealed class LogBudget(long limit)
+    {
+        private long remaining = limit;
+        private int notified;
+
+        /// <summary>Reserves room for a line; false once the budget is exhausted.</summary>
+        public bool TryReserve(int bytes) => Interlocked.Add(ref remaining, -bytes) > 0;
+
+        /// <summary>True exactly once, so the "output suppressed" notice is logged a single time.</summary>
+        public bool NotifyExhaustedOnce() => Interlocked.Exchange(ref notified, 1) == 0;
     }
 
     private string ResolveRunnerScript()
@@ -185,7 +253,13 @@ public sealed class RendererProcessRunner
                 return Path.GetFullPath(configured);
         }
 
+        // The auto-detected search is a development convenience. Outside Development it is confined to
+        // the content root: walking into a parent directory would let a writable ancestor substitute the
+        // script that gets executed. A deployed bundle that keeps the engine tree inside the content root
+        // still resolves without configuration.
+        bool confinedToContentRoot = !environment.IsDevelopment();
         var directory = new DirectoryInfo(environment.ContentRootPath);
+
         while (directory is not null)
         {
             // The engine's runner lives in LazerRender.Game/scripts/. The second candidate keeps
@@ -202,14 +276,18 @@ public sealed class RendererProcessRunner
                     return candidate;
             }
 
+            if (confinedToContentRoot)
+                break;
+
             directory = directory.Parent;
         }
 
         throw new InvalidOperationException(
-            "Could not locate LazerRender.Game/scripts/run-headless.sh. Set Renderer:RunnerScript explicitly.");
+            "Could not locate LazerRender.Game/scripts/run-headless.sh inside the content root. "
+            + "Set Renderer:RunnerScript to an absolute path.");
     }
 
-    private static IEnumerable<string> BuildArgs(RenderInvocation invocation)
+    internal static IEnumerable<string> BuildArgs(RenderInvocation invocation)
     {
         yield return "--replay";
         yield return invocation.ReplayPath;
@@ -225,20 +303,12 @@ public sealed class RendererProcessRunner
         if (invocation.DownloadMissing)
             yield return "--download-missing";
 
-        if (!string.IsNullOrWhiteSpace(invocation.AvatarApiKey))
+        // Credentials travel in a supervisor-written, owner-only file rather than as arguments, so a
+        // live osu! token is not visible in `ps` / `/proc/<pid>/cmdline` for the render's duration.
+        if (!string.IsNullOrWhiteSpace(invocation.SecretsFilePath))
         {
-            yield return "--avatar-api-key";
-            yield return invocation.AvatarApiKey;
-        }
-
-        // A user token signs the engine into lazer's API provider, which is what lets online beatmap
-        // leaderboards (the results screen and the `scoreboard` HUD element) fetch scores.
-        if (!string.IsNullOrWhiteSpace(invocation.OsuUserToken))
-        {
-            yield return "--osu-user-token";
-            yield return invocation.OsuUserToken;
-            yield return "--osu-user-token-expires-in";
-            yield return invocation.OsuUserTokenExpiresIn.ToString(CultureInfo.InvariantCulture);
+            yield return "--secrets-file";
+            yield return invocation.SecretsFilePath;
         }
     }
 
@@ -265,14 +335,20 @@ public sealed class RendererProcessRunner
         }
     }
 
-    private static string ResolveSetsid()
+    private string ResolveSetsid()
     {
         string[] candidates = { "/usr/bin/setsid", "/bin/setsid", "/usr/local/bin/setsid" };
-        foreach (var candidate in candidates)
+
+        foreach (string candidate in candidates)
         {
             if (File.Exists(candidate))
                 return candidate;
         }
+
+        // Falling back to a PATH lookup means a poisoned PATH could substitute the wrapper that is
+        // trusted to create the process group.
+        if (!environment.IsDevelopment())
+            throw new InvalidOperationException("setsid was not found at any standard absolute path.");
 
         return "setsid";
     }

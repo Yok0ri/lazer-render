@@ -31,6 +31,30 @@ public sealed class StorageService
     public string RenderConfigPath(string jobId) => Path.Combine(JobDirectory(jobId), "render-config.json");
     public string OutputDirectory(string jobId) => Path.Combine(JobDirectory(jobId), "output");
     public string ResultPath(string jobId) => Path.Combine(ResultsDirectory, jobId, "output.mp4");
+    public string SecretsPath(string jobId) => Path.Combine(JobDirectory(jobId), "secrets.json");
+
+    /// <summary>
+    /// Writes the per-render secrets document with owner-only permissions. The engine is given this
+    /// path instead of the credential itself, so a live osu! access token never appears in a process
+    /// command line (`ps`, `/proc/&lt;pid&gt;/cmdline`). The file is created 0600 rather than chmodded
+    /// afterwards, so there is no window in which it is world-readable.
+    /// </summary>
+    public async Task WriteSecretsAsync(string jobId, string json, CancellationToken ct)
+    {
+        Directory.CreateDirectory(JobDirectory(jobId));
+
+        await using FileStream stream = FilePermissions.OpenOwnerOnlyFile(SecretsPath(jobId));
+        await using var writer = new StreamWriter(stream);
+        await writer.WriteAsync(json.AsMemory(), ct);
+    }
+
+    /// <summary>Deletes the per-render secrets document. Safe to call when it was never written.</summary>
+    public void DeleteSecrets(string jobId)
+    {
+        string path = SecretsPath(jobId);
+        if (File.Exists(path))
+            File.Delete(path);
+    }
 
     public async Task StageReplayAsync(string jobId, Stream source, CancellationToken ct)
     {

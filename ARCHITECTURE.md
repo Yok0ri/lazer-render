@@ -292,7 +292,7 @@ The parser recognizes:
 - **Commands (exactly one required):** `--replay <path.osr>`, `--replay-info <path.osr>`,
   `--import-map <path>`, `--import-skin <path>`, `--purge <beatmaps|skins|all>`, `--map-info <md5>`.
 - **Render options:** `--skin`, `--output`, `--storage`, `--width`, `--height`, `--fps`,
-  `--duration`, `--avatar-api-key`, `--osu-user-token`, `--osu-user-token-expires-in`,
+  `--duration`, `--secrets-file`, `--avatar-api-key`, `--osu-user-token`, `--osu-user-token-expires-in`,
   `--motion-blur`, `--download-missing`, `--hud-scale`, `--disable-result-screen`,
   `--leaderboard-scope`, `--encoder`,
   `--render-config`.
@@ -479,6 +479,9 @@ infrastructure without pulling in the menu/overlay UI.
   runs after `base.SetHost` (which creates `LocalConfig`) but before `OsuGameBase.load` constructs
   `APIAccess`, which reads and validates that token against `/me` — so it is the same
   persistent-login path the desktop client uses, and it is what makes online leaderboards work.
+  The token is cleared again from persistent config in `Dispose`
+  ([`clearOsuUserToken`](LazerRender.Game/LazerRenderGame.cs:782)), so a render host does not leave a
+  live bearer token in the engine's ini file.
 - [`downloadBeatmapAsync`](LazerRender.Game/LazerRenderGame.cs:578) downloads a missing beatmap:
   - Primary: osu.direct `/api/v2/md5/{hash}` (JSON) → `beatmapset_id` → `/d/{setId}` (`.osz`).
   - Fallback: catboy.best `/api/md5/{hash}` → `ParentSetID` → `/d/{setId}`.
@@ -1048,18 +1051,31 @@ defines the HTTP pipeline. Important blocks:
   directory the same way `StorageService` does, so the DB file and the filesystem layout always agree
   on one root. The default connection string is `data/lazerrender.db`.
 - **Data Protection** ([`:68`](LazerRender.Service/src/LazerRender.Api/Program.cs:68)): persists the
-  key ring to `keys/`. This key ring encrypts osu! refresh tokens at rest; losing it only forces
-  users to re-login.
+  key ring to `keys/`, created owner-only (`0700`, tightening any key files already present) and
+  optionally encrypted at rest with a certificate from `DataProtection:CertificatePath`. The ring
+  encrypts osu! refresh tokens at rest; losing it only forces users to re-login, but anyone who can
+  read it can decrypt every stored credential.
+- **Forwarded headers** ([`ProxyConfiguration`](LazerRender.Service/src/LazerRender.Api/Configuration/ProxyConfiguration.cs:1)):
+  translates `X-Forwarded-Proto`/`-For` from the configured proxies (loopback by default) and runs
+  before everything else, which is what makes `Secure` cookies, HTTPS redirection and per-client rate
+  limiting work behind the TLS-terminating proxy. Forwarded headers from any other address are ignored,
+  so a direct client cannot spoof them.
 - **Cookie auth** ([`:73`](LazerRender.Service/src/LazerRender.Api/Program.cs:73)): session cookie
-  `lazerrender.auth`, 14-day sliding expiration. `OnRedirectToLogin` is overridden to return `401`
+  `lazerrender.auth` with an absolute lifetime (`Auth:SessionLifetimeDays`, default 7) and sliding
+  expiration off; the cookie validator additionally rejects a principal whose `auth_time` claim is
+  older than the limit. `OnRedirectToLogin` is overridden to return `401`
   for API calls instead of redirecting to a login page.
 - **Rate limiting** ([`:91`](LazerRender.Service/src/LazerRender.Api/Program.cs:91)): a global
-  fixed-window limiter keyed by client IP (120 requests/minute → `429`).
+  fixed-window limiter keyed by the (forwarded) client IP (120 requests/minute → `429`), plus a
+  tighter `jobs` policy (10/minute) applied to `POST /api/v1/jobs`.
+- **Response and request guards**: security headers (CSP/HSTS/`nosniff`/`Referrer-Policy`) are added
+  to every response, and `RequestGuards` rejects any state-changing request that lacks the
+  `X-LazerRender-Request` header — a CSRF layer independent of the cookie's `SameSite` policy.
 - **Background services** ([`:111`](LazerRender.Service/src/LazerRender.Api/Program.cs:111)):
   `RenderWorker` (the render loop) and `RetentionSweeper` (deletes expired results) are registered
-  as hosted services; `JobCancellationService`, `RenderLockService`, `EncoderResolver`,
-  `RendererProcessRunner`, `AssetImportRunner`, `MapMetadataService`, `OsuBotAuthService` and
-  `UserOsuTokenService` are singletons.
+  as hosted services; `JobCancellationService`, `RenderLockService`, `JobCreationGate`,
+  `EncoderResolver`, `RendererProcessRunner`, `AssetImportRunner`, `MapMetadataService`,
+  `OsuBotAuthService` and `UserOsuTokenService` are singletons.
 - **Schema bootstrap** ([`:136`](LazerRender.Service/src/LazerRender.Api/Program.cs:136)):
   `DatabaseInitializer.Initialize(...)` runs before the app starts.
 - **Middleware pipeline** ([`:144`](LazerRender.Service/src/LazerRender.Api/Program.cs:144)):
@@ -1128,7 +1144,7 @@ via `AddOptions<...>().Bind(...)` in `Program.cs`.
 | [`StorageOptions`](LazerRender.Service/src/LazerRender.Api/Configuration/StorageOptions.cs:8) | `Storage` | Filesystem layout. Every path is optional; empty values fall back to `{contentRoot}/data/...` subdirectories. `RealmDirectory` is the engine's `--storage` dir. |
 | [`RendererOptions`](LazerRender.Service/src/LazerRender.Api/Configuration/RendererOptions.cs:7) | `Renderer` | How the worker invokes the engine: `RunnerScript` (auto-detected `LazerRender.Game/scripts/run-headless.sh`), `Encoder` (`auto` probes), `DownloadMissing`, `AvatarApiKey`, `OsuBotToken` / `OsuBotRefreshToken` (fallback user credentials for online leaderboards), `ProcessTimeoutSeconds`. |
 | [`QuotaOptions`](LazerRender.Service/src/LazerRender.Api/Configuration/QuotaOptions.cs:6) | `Quota` | Per-user abuse protection: `MaxActiveJobs` (1), `MaxJobsPerDay` (10), `MaxUploadBytes`, `MaxDurationSeconds`, `DefaultMaxAttempts` (3), `ResultRetentionDays` (7). |
-| [`AdminOptions`](LazerRender.Service/src/LazerRender.Api/Configuration/AdminOptions.cs:8) | `Admin` | `OsuUserIds` (comma-separated ids granted `admin`) and `AllowFirstUser` (first login becomes admin). |
+| [`AdminOptions`](LazerRender.Service/src/LazerRender.Api/Configuration/AdminOptions.cs:8) | `Admin` | `OsuUserIds` (comma-separated ids granted `admin`; ships empty) and `BootstrapToken` (one-shot secret that lets a fresh instance claim its initial admin account). |
 | [`OsuOAuthOptions`](LazerRender.Service/src/LazerRender.Api/Configuration/OsuOAuthOptions.cs:8) | `Osu:OAuth` | osu! OAuth v2 client id/secret, endpoints, redirect URI, scopes (default `identify public` — `public` is what the beatmap-leaderboard fetch needs), user-agent. |
 
 #### 3.6.5 `Services/` — business logic
@@ -1203,7 +1219,9 @@ Spawns the engine for a **render** and parses its stdout. The critical mechanics
 - [`BuildArgs`](LazerRender.Service/src/LazerRender.Api/Services/RendererProcessRunner.cs:212) maps a
   [`RenderInvocation`](LazerRender.Service/src/LazerRender.Api/Services/RendererProcessRunner.cs:12)
   to the engine CLI (`--replay --output --storage --render-config --encoder [--download-missing]
-  [--avatar-api-key] [--osu-user-token --osu-user-token-expires-in]`).
+  [--secrets-file <path>]`). Credentials travel as an owner-only secrets file rather than as arguments,
+  so a live osu! token is never visible in `ps` / `/proc/<pid>/cmdline`; the runner also redacts those
+  values from anything the engine prints.
 - `ResolveRunnerScript` walks up from the content root until it finds `LazerRender.Game/scripts/run-headless.sh`.
 
 ##### [`RenderWorker.cs`](LazerRender.Service/src/LazerRender.Api/Services/RenderWorker.cs:16)
@@ -1429,8 +1447,10 @@ cookie.
 #### 3.6.7 `Hubs/JobsHub.cs` — realtime progress
 
 [`JobsHub`](LazerRender.Service/src/LazerRender.Api/Hubs/JobsHub.cs:11) is a SignalR hub with
-`Subscribe(jobId)` / `Unsubscribe(jobId)` that add/remove the connection to a group named after the
-job. The worker broadcasts progress to that group. **Note:** the current SPA does not use this
+`Subscribe(jobId)` / `Unsubscribe(jobId)`. The worker broadcasts progress to a group named after the
+job id. Subscription is **ownership-checked**, matching the REST job endpoints: the id must be a
+well-formed job id and the job's `OwnerUserId` must be the caller, otherwise the join is refused. **Note:**
+the current SPA does not use this
 hub — it polls `GET /api/v1/jobs` every 2 seconds (section 3.13). The hub is present and wired as the
 future low-latency path.
 
@@ -1582,7 +1602,7 @@ Browser ── GET /auth/login ──► 302 → osu.ppy.sh/oauth/authorize?scop
             │
             ├── state mismatch ──► 400
             ├── AuthService.ExchangeCodeAsync → GET /api/v2/me
-            ├── upsert UserEntity (Role from Admin:OsuUserIds / AllowFirstUser)
+            ├── upsert UserEntity (Role from Admin:OsuUserIds, or the BootstrapToken claim)
             ├── encrypt refresh token (Data Protection → keys/)
             ├── !IsAllowed ──► throw UserNotAllowedException ──► 302 /auth/denied
             └── allowed ──► SignInAsync(cookie with Role claim) ──► 302 /
@@ -1637,7 +1657,7 @@ Swagger UI is available at `/swagger` in Development.
 3. It writes the job's `RenderConfigJson` to `data/jobs/{id}/render-config.json`.
 4. [`RendererProcessRunner`](LazerRender.Service/src/LazerRender.Api/Services/RendererProcessRunner.cs:36)
    spawns `setsid LazerRender.Game/scripts/run-headless.sh --replay <osr> --output <jobdir>/output --storage
-   <realm> --render-config <json> --encoder <enc> [--download-missing] [--avatar-api-key ...]`.
+   <realm> --render-config <json> --encoder <enc> [--download-missing] [--secrets-file <jobdir>/secrets.json]`.
 5. `run-headless.sh` starts a throwaway Weston compositor, runs the engine, and tears it down.
 6. The engine writes JSON progress lines to stdout; the runner parses them and calls back into the
    worker, which updates the job row (`Phase`, `Frame`, `Total`, `FpsNow`) and broadcasts over

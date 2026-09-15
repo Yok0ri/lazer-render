@@ -14,6 +14,13 @@ public sealed class QuotaOptions
     public int DefaultMaxAttempts { get; set; } = 3;
     public int ResultRetentionDays { get; set; } = 7;
 
+    /// <summary>
+    /// Largest beatmap package accepted for upload. Distinct from <see cref="MaxUploadBytes"/> (which
+    /// caps replays): a beatmap package is expanded by third-party parsers, so it gets its own,
+    /// explicit ceiling rather than inheriting the global request-body limit.
+    /// </summary>
+    public long MaxBeatmapBytes { get; set; } = 104857600;
+
     /// <summary>Conservative video bitrate model (bits per pixel). 0.20 bpp ≈ 25 Mbps at 1080p60,
     /// which covers CRF/QP-18 encodes including beatmaps with background video.</summary>
     public double SizeBitsPerPixel { get; set; } = 0.20;

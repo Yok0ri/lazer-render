@@ -24,6 +24,7 @@ public sealed class QuotaService
     public double MaxDurationSeconds => options.MaxDurationSeconds;
     public int DefaultMaxAttempts => options.DefaultMaxAttempts;
     public int ResultRetentionDays => options.ResultRetentionDays;
+    public long MaxBeatmapBytes => options.MaxBeatmapBytes;
 
     public async Task<string?> ValidateAsync(string userId, DateTimeOffset now, CancellationToken ct)
     {

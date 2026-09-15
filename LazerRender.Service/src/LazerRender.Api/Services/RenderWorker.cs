@@ -1,3 +1,4 @@
+using System.Text.Json;
 using LazerRender.Api.Configuration;
 using LazerRender.Api.Data;
 using LazerRender.Api.Hubs;
@@ -174,7 +175,7 @@ public sealed class RenderWorker : BackgroundService
                 .FirstOrDefaultAsync();
 
             if (job is not null)
-                await mapMetadata.ResolveAndUpdateAsync(job.Id, job.ReplayMd5!);
+                await mapMetadata.ResolveAndUpdateAsync(job.Id, job.ReplayMd5!, CancellationToken.None);
         }
         catch (Exception e)
         {
@@ -254,6 +255,38 @@ public sealed class RenderWorker : BackgroundService
             OsuAccessToken? osuToken = await userOsuTokens.GetTokenAsync(job.OwnerUserId, jobCts.Token)
                                       ?? await osuBotAuth.GetTokenAsync(jobCts.Token);
 
+            string? avatarApiKey = string.IsNullOrWhiteSpace(rendererOptions.AvatarApiKey)
+                ? null
+                : rendererOptions.AvatarApiKey;
+
+            // The engine reads its credentials from an owner-only file rather than from the command
+            // line, so a live token is never visible in `ps` / `/proc/<pid>/cmdline`. The values stay
+            // here as well so the log bridge can redact an accidental echo.
+            var redacted = new List<string>();
+            string? secretsPath = null;
+
+            if (osuToken is not null || avatarApiKey is not null)
+            {
+                secretsPath = storage.SecretsPath(job.Id);
+
+                var secrets = new Dictionary<string, object?>();
+
+                if (osuToken is not null)
+                {
+                    secrets[@"osuUserToken"] = osuToken.AccessToken;
+                    secrets[@"osuUserTokenExpiresIn"] = osuToken.ExpiresIn;
+                    redacted.Add(osuToken.AccessToken);
+                }
+
+                if (avatarApiKey is not null)
+                {
+                    secrets[@"avatarApiKey"] = avatarApiKey;
+                    redacted.Add(avatarApiKey);
+                }
+
+                await storage.WriteSecretsAsync(job.Id, JsonSerializer.Serialize(secrets), jobCts.Token);
+            }
+
             var invocation = new RenderInvocation(
                 job.Id,
                 storage.StagedReplayPath(job.Id),
@@ -262,30 +295,41 @@ public sealed class RenderWorker : BackgroundService
                 storage.RealmDirectory,
                 job.Encoder.ToString().ToLowerInvariant(),
                 rendererOptions.DownloadMissing,
-                string.IsNullOrWhiteSpace(rendererOptions.AvatarApiKey) ? null : rendererOptions.AvatarApiKey,
-                osuToken?.AccessToken,
-                osuToken?.ExpiresIn ?? 3600);
+                secretsPath,
+                redacted);
 
-            var result = await runner.RunAsync(invocation, jobCts.Token, async progress =>
+            RenderRunResult result;
+
+            try
             {
-                try
+                result = await runner.RunAsync(invocation, jobCts.Token, async progress =>
                 {
-                    job.Phase = progress.ParsedPhase.ToWire();
-                    job.Frame = progress.Frame;
-                    job.Total = progress.Total;
-                    job.FpsNow = progress.Fps;
+                    try
+                    {
+                        job.Phase = progress.ParsedPhase.ToWire();
+                        job.Frame = progress.Frame;
+                        job.Total = progress.Total;
+                        job.FpsNow = progress.Fps;
 
-                    if (progress.ParsedPhase == RenderPhase.Finalizing)
-                        job.Status = JobStatus.Finalizing;
+                        if (progress.ParsedPhase == RenderPhase.Finalizing)
+                            job.Status = JobStatus.Finalizing;
 
-                    await db.SaveChangesAsync();
-                    await BroadcastProgressAsync(jobId, progress);
-                }
-                catch (Exception e)
-                {
-                    logger.LogWarning(e, "Failed to persist progress for job {JobId}.", jobId);
-                }
-            });
+                        await db.SaveChangesAsync();
+                        await BroadcastProgressAsync(jobId, progress);
+                    }
+                    catch (Exception e)
+                    {
+                        logger.LogWarning(e, "Failed to persist progress for job {JobId}.", jobId);
+                    }
+                });
+            }
+            finally
+            {
+                // The engine deletes the file once it has read it; this also covers a render that
+                // never started. A credential must not outlive the job it was minted for.
+                if (secretsPath is not null)
+                    storage.DeleteSecrets(job.Id);
+            }
 
             if (jobCts.Token.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
             {

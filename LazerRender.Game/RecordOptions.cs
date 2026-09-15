@@ -176,6 +176,14 @@ namespace LazerRender
         /// </summary>
         public string? OsuUserToken { get; set; }
 
+        /// <summary>
+        /// Optional path to a JSON secrets document written by a supervisor (<c>--secrets-file</c>).
+        /// It carries <c>osuUserToken</c>, <c>osuUserTokenExpiresIn</c> and <c>avatarApiKey</c>, so a
+        /// live credential never appears in this process's command line. The file is deleted as soon
+        /// as it has been read.
+        /// </summary>
+        public string? SecretsPath { get; set; }
+
         /// <summary>Validity of <see cref="OsuUserToken"/> in seconds
         /// (<c>--osu-user-token-expires-in</c>). Only used to build the token lazer stores.</summary>
         public long OsuUserTokenExpiresIn { get; set; } = 3600;

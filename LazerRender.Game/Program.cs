@@ -253,6 +253,11 @@ namespace LazerRender
                         applyRenderConfig(options, json);
                         break;
 
+                    // Supervisor-written secrets document; read after parsing so an explicit flag wins.
+                    case @"--secrets-file":
+                        options.SecretsPath = value(++i);
+                        break;
+
                     case @"--help":
                     case @"-h":
                         return null;
@@ -279,6 +284,11 @@ namespace LazerRender
                 Console.Error.WriteLine($@"Unknown purge target: {options.PurgeTarget} (expected beatmaps, skins or all).");
                 return null;
             }
+
+            // Credentials may be delivered in a supervisor-written secrets file rather than on the
+            // command line, so a bearer token is never visible in ps / /proc/<pid>/cmdline.
+            if (!string.IsNullOrWhiteSpace(options.SecretsPath))
+                applySecretsFile(options, options.SecretsPath);
 
             // The avatar API key may also be supplied through the environment.
             options.AvatarApiKey ??= Environment.GetEnvironmentVariable(@"OSU_API_KEY");
@@ -504,6 +514,56 @@ namespace LazerRender
             _ => throw new ArgumentException($@"Unknown encoder: {value} (expected cpu, amd, nvidia or intel)"),
         };
 
+        /// <summary>
+        /// Loads a supervisor-written secrets document (<c>--secrets-file</c>) and deletes it as soon
+        /// as it has been read. A value is only applied when the corresponding CLI flag was not given,
+        /// so an explicit flag still wins.
+        /// </summary>
+        private static void applySecretsFile(RecordOptions options, string path)
+        {
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+                JsonElement root = document.RootElement;
+
+                if (options.OsuUserToken is null
+                    && root.TryGetProperty(@"osuUserToken", out JsonElement token)
+                    && token.ValueKind == JsonValueKind.String)
+                {
+                    options.OsuUserToken = token.GetString();
+                }
+
+                if (root.TryGetProperty(@"osuUserTokenExpiresIn", out JsonElement expires)
+                    && expires.ValueKind == JsonValueKind.Number)
+                {
+                    options.OsuUserTokenExpiresIn = expires.GetInt64();
+                }
+
+                if (options.AvatarApiKey is null
+                    && root.TryGetProperty(@"avatarApiKey", out JsonElement avatar)
+                    && avatar.ValueKind == JsonValueKind.String)
+                {
+                    options.AvatarApiKey = avatar.GetString();
+                }
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine($@"Could not read the secrets file: {e.Message}");
+            }
+            finally
+            {
+                // Never leave the credential on disk after it has been consumed.
+                try
+                {
+                    File.Delete(path);
+                }
+                catch
+                {
+                    // Best effort; the supervisor deletes it too.
+                }
+            }
+        }
+
         private static void printUsage()
         {
             Console.WriteLine(
@@ -548,10 +608,16 @@ Render options:
                     global (default), country, friend or team. Mirrors the scope
                     a player can pick in song select; needs a user token to have
                     any effect
+  --secrets-file <path>  JSON document written by a supervisor containing
+                    osuUserToken, osuUserTokenExpiresIn and avatarApiKey. Preferred
+                    over the two flags below: it keeps credentials out of the process
+                    command line. The file is deleted once it has been read.
   --avatar-api-key <key>  osu! API v2 client-credentials token for fetching the player
-                    avatar (falls back to the OSU_API_KEY environment variable)
+                    avatar (falls back to the OSU_API_KEY environment variable).
+                    Prefer --secrets-file; this flag is for local manual runs.
   --osu-user-token <token>  osu! API v2 *user* access token used to sign lazer in, so
-                    online beatmap leaderboards / the scoreboard element work
+                    online beatmap leaderboards / the scoreboard element work.
+                    Prefer --secrets-file; this flag is for local manual runs.
   --osu-user-token-expires-in <sec>  Validity of --osu-user-token (default: 3600)
   --motion-blur <n>    Blend n frames with FFmpeg's tmix filter for motion blur
                         (default: 0 = disabled; 3 = light, 5 = heavy)

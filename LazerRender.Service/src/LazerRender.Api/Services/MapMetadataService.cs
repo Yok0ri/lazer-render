@@ -38,7 +38,7 @@ public sealed class MapMetadataService
         this.logger = logger;
     }
 
-    public async Task ResolveAndUpdateAsync(string jobId, string md5)
+    public async Task ResolveAndUpdateAsync(string jobId, string md5, CancellationToken ct)
     {
         try
         {
@@ -56,7 +56,7 @@ public sealed class MapMetadataService
             }
 
             // A render holds the shared lock for its whole duration; do not block a running render.
-            if (!await renderLock.Gate.WaitAsync(TimeSpan.FromSeconds(3)))
+            if (!await renderLock.Gate.WaitAsync(TimeSpan.FromSeconds(3), ct))
                 return;
 
             try
@@ -69,7 +69,7 @@ public sealed class MapMetadataService
                 if (rendererOptions.DownloadMissing)
                     args.Add("--download-missing");
 
-                var stdout = await runner.CaptureAsync(args, CancellationToken.None);
+                var stdout = await runner.CaptureAsync(args, ct);
 
                 var metadata = Parse(stdout);
 
@@ -101,6 +101,13 @@ public sealed class MapMetadataService
             {
                 renderLock.Gate.Release();
             }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller's deadline elapsed and it is not going to wait any longer, so the lookup is
+            // abandoned rather than orphaned (it used to keep running while holding the render lock).
+            // The worker re-resolves metadata after the render.
+            logger.LogDebug("Map metadata resolution for job {JobId} was cancelled by its deadline.", jobId);
         }
         catch (Exception e)
         {

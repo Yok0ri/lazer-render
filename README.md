@@ -189,14 +189,18 @@ Legacy aliases (still accepted): `--disable-storyboard` (→ `--no-storyboard`),
   that `country`/`friend` additionally require osu!supporter on that account, and `team` requires the
   account to be on a team — so `global` is the only choice that always works. The web UI always sends
   `global`.
+- `--secrets-file <path>` — JSON document carrying `osuUserToken`, `osuUserTokenExpiresIn` and
+  `avatarApiKey`, deleted as soon as it has been read. Preferred over the two flags below because it
+  keeps a live credential out of the process command line; the web service always uses it.
 - `--avatar-api-key <key>` — osu! API v2 token used to fetch the replay player's avatar for the
   results screen (falls back to the `OSU_API_KEY` environment variable). The endpoint is public, so
   a client-credentials token is enough. When unset, the avatar is resolved from the user id embedded
-  in the replay (`https://a.ppy.sh/{id}`).
+  in the replay (`https://a.ppy.sh/{id}`). For local manual runs — the service uses `--secrets-file`.
 - `--osu-user-token <token>` — osu! API v2 **user** access token that signs the engine in, which is
   what enables online beatmap leaderboards (the results-screen scoreboard and the `scoreboard` HUD
   element). Client-credentials tokens cannot be used here: lazer validates the token against `/me`.
-  `--osu-user-token-expires-in <sec>` sets its validity (default 3600).
+  `--osu-user-token-expires-in <sec>` sets its validity (default 3600). For local manual runs — the
+  service uses `--secrets-file`.
 - `--motion-blur <n>` — blends `n` consecutive frames with FFmpeg's `tmix` filter (exponential-decay
   weights, most recent frame dominant) to simulate a high shutter angle. `0` (default) disables it;
   `3` is a light blur, `5` is heavy.
@@ -264,8 +268,9 @@ written to `LazerRender.Service/src/LazerRender.Api/data/` (gitignored).
 
 ### What it does
 
-- **Login** via osu! OAuth v2 (`identify public`), gated by an allowlist; the first account to sign
-  in is granted `admin` (configurable via `Admin:OsuUserIds`). `public` is requested alongside
+- **Login** via osu! OAuth v2 (`identify public`), gated by an allowlist. There is no
+  first-login-wins admin: grant it by listing ids in `Admin:OsuUserIds`, or claim a fresh instance
+  once with `Admin:BootstrapToken` (see `DEPLOYMENT.md` §8). `public` is requested alongside
   `identify` because the beatmap-leaderboard endpoint needs it; the service warns at startup if the
   configured scopes omit it.
 - **Render queue** — upload an `.osr`, choose render options, and the job is validated, queued and
@@ -303,7 +308,7 @@ The authoritative plan is [`ROADMAP.md`](ROADMAP.md). Status at a glance:
 | 4 | Hardware acceleration & optimization | ✅ completed |
 | 5 | The web API daemon | ✅ completed |
 | 6 | Render & web UX refinements | ✅ completed |
-| 7 | Security audit & hardening | ⬜ planned |
+| 7 | Security audit & hardening | ✅ audit complete; P0-P2 hardening done |
 | 8 | Docker, observability & release | ⬜ planned |
 | 9 | New features (replay viewer, strain graph) | ⬜ planned |
 

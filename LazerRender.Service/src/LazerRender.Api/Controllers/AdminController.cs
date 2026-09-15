@@ -19,19 +19,22 @@ public sealed class AdminController : ControllerBase
     private readonly AppDbContext db;
     private readonly OsuOAuthService osu;
     private readonly RendererOptions rendererOptions;
+    private readonly ILogger<AdminController> logger;
 
     public AdminController(
         StorageService storage,
         AssetImportRunner importer,
         AppDbContext db,
         OsuOAuthService osu,
-        IOptions<RendererOptions> rendererOptions)
+        IOptions<RendererOptions> rendererOptions,
+        ILogger<AdminController> logger)
     {
         this.storage = storage;
         this.importer = importer;
         this.db = db;
         this.osu = osu;
         this.rendererOptions = rendererOptions.Value;
+        this.logger = logger;
     }
 
     [HttpPost("purge")]
@@ -105,7 +108,9 @@ public sealed class AdminController : ControllerBase
             }
             catch (Exception e)
             {
-                return BadRequest(new ErrorResponse("lookup_failed", e.Message));
+                // Admin-only, but an internal exception message is still not the client's business.
+                logger.LogWarning(e, "osu! user lookup failed for \"{Username}\".", request.Username);
+                return BadRequest(new ErrorResponse("lookup_failed", "The osu! user could not be looked up."));
             }
 
             osuUserId = resolved.Id;

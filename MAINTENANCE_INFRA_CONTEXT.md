@@ -641,3 +641,47 @@ Engine **stdout** at the same time carries the machine-readable contract (not lo
    `Controllers/AdminController.cs` + `Controllers/MetaController.cs` — the panel to extend.
 7. `LazerRender.Game/scripts/run-headless.sh` — where a debug/release decision and a debug env var would
    actually take effect.
+
+---
+
+## 8. Dependency inventory (added for audit finding L-11)
+
+**Service half — now centrally managed.** `LazerRender.Service/Directory.Packages.props` enables central
+package management and `RestorePackagesWithLockFile`, so each service project has a committed
+`packages.lock.json`. It sits under `LazerRender.Service/` deliberately: MSBuild resolves
+`Directory.Packages.props` by walking up and stopping at the first hit, so the engine
+(`LazerRender.Game/`, which has no `PackageReference`s of its own) and the pinned `extern/osu` submodule
+are unaffected. Enabling it at the repository root would apply to the submodule's projects and break
+their own pins.
+
+Pinned versions (service): EF Core Design and Sqlite `8.0.11`, Swashbuckle `6.6.2` (Debug-only),
+Microsoft.NET.Test.Sdk `17.8.0`, xunit `2.6.6`, xunit.runner.visualstudio `2.5.6`.
+
+**Engine half — defined entirely by the submodule pin.** The engine has no direct packages; its
+dependency set is whatever `extern/osu` resolves at the pinned tag. The following are **not** declared
+anywhere in this repository and so cannot be audited from our csproj files — they arrive transitively
+through `ppy.osu.Framework`:
+
+- `ManagedBass` / `ManagedBass.Fx` / `ManagedBass.Mix` — used directly by `BassTrackDecoder.cs` and
+  `HitsoundMixer.cs`.
+- `ImageSharp`, `Silk.NET`, `Veldrid` — rendering/imaging, via the framework.
+
+Re-derive this list after every submodule bump:
+
+```bash
+dotnet list LazerRender.Game/LazerRender.Game.csproj package --include-transitive
+```
+
+**Silenced advisory to re-assess on every bump.** `extern/osu/osu.Game/osu.Game.csproj` pins
+`AutoMapper 13.0.1` with `<NoWarn>NU1903</NoWarn>` ("package has a known high severity vulnerability")
+and the comment "does not affect us". That claim is upstream's and has **not** been verified for our
+usage. It is held back deliberately (upstream cites a licence change). Treat it as an open item each
+time the pin moves.
+
+**Transitive telemetry.** `Sentry 6.6.0` is present in the submodule's dependency set. No Sentry
+initialisation was found in `LazerRender.Game/*.cs`, but confirm that again when the engine logging is
+reworked for Phase 8.2.
+
+**Not in the engine's closure.** `Velopack` and the rest of `osu.Desktop`'s dependency set should not be
+part of our build (the engine references `osu.Game` plus the four rulesets, not `osu.Desktop`); confirm
+that still holds after a bump.

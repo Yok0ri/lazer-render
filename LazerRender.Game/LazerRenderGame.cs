@@ -542,6 +542,13 @@ namespace LazerRender
                 throw new InvalidOperationException(@"Unexpected .osr header: missing string marker.");
 
             int length = readVarint(stream);
+
+            // Mirror the service's parser: a lazer beatmap hash is 32 ASCII characters, so a longer
+            // length means the file is not a replay header. Bounds the allocation before it happens,
+            // since this CLI also runs standalone against an untrusted file.
+            if (length is < 0 or > 256)
+                throw new InvalidOperationException(@"Unexpected .osr header: implausible hash length.");
+
             byte[] hash = new byte[length];
             stream.ReadExactly(hash);
 
@@ -573,7 +580,7 @@ namespace LazerRender
 
         /// <summary>
         /// Downloads a missing beatmap package from a public mirror (osu.direct, falling back to
-        /// Nerinyan) and returns the path to the downloaded <c>.osz</c>.
+        /// catboy.best) and returns the path to the downloaded <c>.osz</c>.
         /// </summary>
         private static async Task<string> downloadBeatmapAsync(string hash)
         {
@@ -804,6 +811,38 @@ namespace LazerRender
             catch (Exception ex)
             {
                 Logger.Log($@"osu! API login: failed to inject the user token: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Clears the injected token from lazer's persistent config on the way out, so a render host
+        /// never leaves a live bearer token in the engine's ini file. This is best effort: SIGKILL
+        /// cannot be handled, which is why the supervisor also passes the credential through a
+        /// short-lived secrets file rather than the command line.
+        /// </summary>
+        protected override void Dispose(bool isDisposing)
+        {
+            if (isDisposing)
+                clearOsuUserToken();
+
+            base.Dispose(isDisposing);
+        }
+
+        private void clearOsuUserToken()
+        {
+            if (string.IsNullOrWhiteSpace(options.OsuUserToken))
+                return;
+
+            try
+            {
+                LocalConfig.SetValue(OsuSetting.SavePassword, false);
+                LocalConfig.SetValue(OsuSetting.Token, string.Empty);
+
+                Logger.Log(@"osu! API login: cleared the injected user token from persistent config.");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($@"osu! API login: could not clear the injected user token: {ex.Message}");
             }
         }
 

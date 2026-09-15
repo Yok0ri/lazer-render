@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -29,7 +30,7 @@ public static class DatabaseInitializer
         ("beatmap_cache", "Stars", "REAL NULL"),
     };
 
-    public static void Initialize(IServiceProvider services)
+    public static IReadOnlyList<string> Initialize(IServiceProvider services)
     {
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -40,6 +41,35 @@ public static class DatabaseInitializer
             EnsureColumn(db, table, column, ddl);
 
         EnsurePresetsTable(db);
+
+        var warnings = new List<string>();
+        EnsureDisplayNumberIndex(db, warnings);
+
+        return warnings;
+    }
+
+    /// <summary>
+    /// Makes display numbers unique, which is the database-level half of the fix for two concurrent
+    /// creations taking the same value. Best effort: an existing database may already hold duplicates,
+    /// and refusing to start would be worse than leaving a cosmetic constraint off, so a failure is
+    /// reported as a warning instead.
+    /// </summary>
+    private static void EnsureDisplayNumberIndex(AppDbContext db, List<string> warnings)
+    {
+        try
+        {
+            // Identifier is a compile-time constant.
+#pragma warning disable EF1002
+            db.Database.ExecuteSqlRaw(
+                "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_jobs_DisplayNumber\" ON \"jobs\" (\"DisplayNumber\");");
+#pragma warning restore EF1002
+        }
+        catch (DbException)
+        {
+            warnings.Add(
+                "Could not create the unique index on jobs.DisplayNumber because duplicate values already "
+                + "exist. Display numbers may collide until the duplicates are resolved.");
+        }
     }
 
     private static void EnsurePresetsTable(AppDbContext db)

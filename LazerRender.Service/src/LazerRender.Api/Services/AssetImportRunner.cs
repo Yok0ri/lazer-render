@@ -19,6 +19,12 @@ public sealed class AssetImportBusyException : Exception
 /// </summary>
 public sealed class AssetImportRunner
 {
+    /// <summary>
+    /// Import stdout/stderr derives from the uploaded package, so only an excerpt is logged rather than
+    /// the whole stream.
+    /// </summary>
+    private const int MaxExcerptLength = 1000;
+
     private readonly RenderLockService renderLock;
     private readonly RendererOptions options;
     private readonly IHostEnvironment environment;
@@ -48,7 +54,7 @@ public sealed class AssetImportRunner
 
             logger.LogInformation(
                 "Asset operation exited with code {ExitCode}. stdout: {Stdout} stderr: {Stderr}",
-                exitCode, stdout, stderr);
+                exitCode, Excerpt(stdout), Excerpt(stderr));
 
             if (exitCode != 0)
                 throw new InvalidOperationException($"LazerRender exited with code {exitCode}: {stderr}");
@@ -68,6 +74,11 @@ public sealed class AssetImportRunner
         var (_, stdout, _) = await RunProcessAsync(args, ct);
         return stdout;
     }
+
+    private static string Excerpt(string text) =>
+        text.Length <= MaxExcerptLength
+            ? text
+            : string.Concat(text.AsSpan(0, MaxExcerptLength), "…[truncated]");
 
     private async Task<(int ExitCode, string Stdout, string Stderr)> RunProcessAsync(
         IReadOnlyList<string> args, CancellationToken ct)
@@ -106,7 +117,11 @@ public sealed class AssetImportRunner
                 return Path.GetFullPath(configured);
         }
 
+        // See RendererProcessRunner: the search is a development convenience and is confined to the
+        // content root outside Development, so a writable ancestor cannot substitute the script.
+        bool confinedToContentRoot = !environment.IsDevelopment();
         var directory = new DirectoryInfo(environment.ContentRootPath);
+
         while (directory is not null)
         {
             // The engine's runner lives in LazerRender.Game/scripts/. The second candidate keeps
@@ -123,21 +138,29 @@ public sealed class AssetImportRunner
                     return candidate;
             }
 
+            if (confinedToContentRoot)
+                break;
+
             directory = directory.Parent;
         }
 
         throw new InvalidOperationException(
-            "Could not locate LazerRender.Game/scripts/run-headless.sh. Set Renderer:RunnerScript explicitly.");
+            "Could not locate LazerRender.Game/scripts/run-headless.sh inside the content root. "
+            + "Set Renderer:RunnerScript to an absolute path.");
     }
 
-    private static string ResolveSetsid()
+    private string ResolveSetsid()
     {
         string[] candidates = { "/usr/bin/setsid", "/bin/setsid", "/usr/local/bin/setsid" };
-        foreach (var candidate in candidates)
+
+        foreach (string candidate in candidates)
         {
             if (File.Exists(candidate))
                 return candidate;
         }
+
+        if (!environment.IsDevelopment())
+            throw new InvalidOperationException("setsid was not found at any standard absolute path.");
 
         return "setsid";
     }

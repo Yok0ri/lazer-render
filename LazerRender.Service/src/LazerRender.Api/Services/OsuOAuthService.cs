@@ -135,9 +135,37 @@ public sealed class OsuOAuthService
 
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException(
-                $"osu! token endpoint returned {(int)response.StatusCode}: {body}");
+                $"osu! token endpoint returned {(int)response.StatusCode}{DescribeError(body)}");
 
         return JsonSerializer.Deserialize<OsuTokenResponse>(body)
             ?? throw new InvalidOperationException("Empty token response from osu!.");
+    }
+
+    /// <summary>
+    /// Reduces an error body to just its short <c>error</c> code. The raw body is never surfaced: it is
+    /// unbounded and comes from the remote service, and a future osu! error format that echoed the
+    /// request would put the client secret or a refresh token straight into our logs.
+    /// </summary>
+    internal static string DescribeError(string body)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+
+            if (document.RootElement.TryGetProperty("error", out JsonElement error)
+                && error.ValueKind == JsonValueKind.String)
+            {
+                string? code = error.GetString();
+
+                if (!string.IsNullOrWhiteSpace(code) && code.Length <= 64)
+                    return $": {code}";
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON: say nothing rather than echoing it.
+        }
+
+        return ".";
     }
 }

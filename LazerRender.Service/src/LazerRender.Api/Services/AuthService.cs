@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using LazerRender.Api.Configuration;
 using LazerRender.Api.Data;
 using Microsoft.AspNetCore.DataProtection;
@@ -28,7 +30,7 @@ public sealed class AuthService
     private readonly UserOsuTokenService userTokens;
     private readonly IDataProtector protector;
     private readonly HashSet<long> adminIds;
-    private readonly bool allowFirstUser;
+    private readonly string bootstrapToken;
     private readonly string scopes;
 
     public AuthService(
@@ -44,7 +46,7 @@ public sealed class AuthService
         this.userTokens = userTokens;
         protector = protectionProvider.CreateProtector("OsuOAuth.RefreshToken");
         adminIds = ParseAdminIds(adminOptions.Value.OsuUserIds);
-        allowFirstUser = adminOptions.Value.AllowFirstUser;
+        bootstrapToken = adminOptions.Value.BootstrapToken;
         scopes = osuOptions.Value.Scopes;
     }
 
@@ -60,13 +62,12 @@ public sealed class AuthService
         return set;
     }
 
-    public async Task<UserEntity> SignInWithOsuAsync(string code, CancellationToken ct)
+    public async Task<UserEntity> SignInWithOsuAsync(string code, string? presentedBootstrapToken, CancellationToken ct)
     {
         var token = await osu.ExchangeCodeAsync(code, ct);
         var me = await osu.GetMeAsync(token.AccessToken, ct);
 
-        var isFirstUser = allowFirstUser && !await db.Users.AnyAsync(ct);
-        var isAdmin = adminIds.Contains(me.Id) || isFirstUser;
+        var isAdmin = adminIds.Contains(me.Id) || await mayClaimBootstrapAdminAsync(presentedBootstrapToken, ct);
 
         var user = await db.Users
             .Include(u => u.OAuthToken)
@@ -123,6 +124,33 @@ public sealed class AuthService
 
         return user;
     }
+
+    /// <summary>
+    /// Whether this sign-in may claim the initial admin account. All three must hold: a bootstrap
+    /// token is configured, the presented token matches it, and the database has no admin yet. This
+    /// replaces the old "first user to log in wins" behaviour, which let any visitor take admin on an
+    /// instance that was reachable before its operator had signed in.
+    /// </summary>
+    internal static async Task<bool> MayClaimBootstrapAdminAsync(
+        AppDbContext db, string configuredToken, string? presented, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(configuredToken) || string.IsNullOrWhiteSpace(presented))
+            return false;
+
+        // Constant-time compare: the token is a secret, and a timing side channel on it would be a
+        // straight path to the first admin account.
+        if (!CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(presented),
+                Encoding.UTF8.GetBytes(configuredToken)))
+        {
+            return false;
+        }
+
+        return !await db.Users.AnyAsync(u => u.Role == "admin", ct);
+    }
+
+    private Task<bool> mayClaimBootstrapAdminAsync(string? presented, CancellationToken ct)
+        => MayClaimBootstrapAdminAsync(db, bootstrapToken, presented, ct);
 
     public async Task RemoveRefreshTokenAsync(string userId, CancellationToken ct)
     {

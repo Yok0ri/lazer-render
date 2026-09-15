@@ -42,8 +42,5 @@ RESPONSE=$(curl --silent --show-error --fail \
     --data-urlencode "grant_type=authorization_code" \
     --data-urlencode "redirect_uri=${REDIRECT_URI}")
 
-echo "Token response:"
-echo "${RESPONSE}" | jq .
-echo
-echo "Renderer:OsuBotRefreshToken value:"
+echo "Refresh token (treat it as a secret; it is not written to disk):"
 echo "${RESPONSE}" | jq -r '.refresh_token'

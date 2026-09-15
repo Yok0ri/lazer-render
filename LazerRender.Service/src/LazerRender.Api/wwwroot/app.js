@@ -15,6 +15,12 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+// State-changing requests must carry this header. A cross-site page cannot set it without a CORS
+// preflight, and the service sends no CORS headers, so it doubles as a CSRF control alongside the
+// cookie's SameSite policy. Must match RequestGuards.HeaderName.
+const CSRF_HEADER = "X-LazerRender-Request";
+const CSRF_SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
+
 function esc(value) {
   return String(value ?? "")
     .replace(/&/g, "\u0026amp;")
@@ -25,11 +31,14 @@ function esc(value) {
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    credentials: "same-origin",
-    headers: options.body instanceof FormData ? undefined : { "Content-Type": "application/json" },
-    ...options,
-  });
+  const method = (options.method || "GET").toUpperCase();
+  const headers = { ...(options.headers || {}) };
+
+  // FormData must keep the browser-generated multipart boundary, so no Content-Type is set for it.
+  if (!(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
+  if (!CSRF_SAFE_METHODS.includes(method)) headers[CSRF_HEADER] = "1";
+
+  const res = await fetch(path, { ...options, credentials: "same-origin", headers });
 
   if (res.status === 401) { showLogin(); throw new Error("unauthorized"); }
   if (res.status === 204) return null;
@@ -67,11 +76,21 @@ function renderUser() {
     ? `<img src="${esc(state.me.avatarUrl)}" alt="avatar" width="30" height="30" />`
     : "";
   area.innerHTML = `${avatar}<span>${esc(state.me.username)}</span>` +
-    `<a class="btn ghost" href="/auth/logout" onclick="event.preventDefault(); doLogout();">Log out</a>`;
+    `<a class="btn ghost" id="logout-btn" href="/auth/logout">Log out</a>`;
+
+  // Bound as a listener rather than an inline onclick, so the CSP can keep script-src at 'self'.
+  $("logout-btn")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    doLogout();
+  });
 }
 
 async function doLogout() {
-  await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
+  await fetch("/auth/logout", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { [CSRF_HEADER]: "1" },
+  });
   window.location.reload();
 }
 
@@ -506,7 +525,7 @@ function progressState(job) {
         kind: "determinate",
         pct,
         html: `<div class="job-progress" data-progress data-kind="determinate">
-          <div class="bar"><div class="fill" style="width:${pct.toFixed(1)}%"></div></div>
+          <div class="bar"><div class="fill" data-fill-pct="${pct.toFixed(1)}"></div></div>
           <div class="text"><span data-frames>${job.frame.toLocaleString()} / ${job.total.toLocaleString()} frames</span><span data-pct>${pct.toFixed(1)}% · ${job.fpsNow.toFixed(1)} fps</span></div>
         </div>`,
       };
@@ -617,11 +636,12 @@ function renderJobList(container, jobs, compact = false) {
     container.innerHTML = jobs.length
       ? jobs.map((j) => jobCard(j, compact)).join("")
       : '<p class="empty">No renders yet. Queue your first replay above.</p>';
+    applyProgressWidths(container);
     return;
   }
 
   jobs.forEach((job) => {
-    const card = container.querySelector(`[data-job-id="${job.id}"]`);
+    const card = container.querySelector(`[data-job-id="${CSS.escape(job.id)}"]`);
     if (!card) return;
     syncJobCard(card, job, compact);
   });
@@ -652,6 +672,7 @@ function syncProgress(card, job) {
 
   if (!el) {
     card.insertAdjacentHTML("afterbegin", target.html);
+    applyProgressWidths(card);
     return;
   }
 
@@ -659,6 +680,7 @@ function syncProgress(card, job) {
   // place so the indeterminate animation is not restarted and DevTools state is preserved.
   if (el.dataset.kind !== target.kind) {
     el.outerHTML = target.html;
+    applyProgressWidths(card);
     return;
   }
 
@@ -679,6 +701,14 @@ function syncProgress(card, job) {
 function setSpan(root, selector, text) {
   const span = root.querySelector(selector);
   if (span) span.textContent = text;
+}
+
+// The CSP keeps style-src at 'self', so the progress bar's width is applied through the CSSOM rather
+// than an inline style attribute. Elements carrying data-fill-pct are synced after every (re-)render.
+function applyProgressWidths(root) {
+  root.querySelectorAll("[data-fill-pct]").forEach((fill) => {
+    fill.style.width = `${fill.dataset.fillPct}%`;
+  });
 }
 
 function syncActions(card, job) {

@@ -137,25 +137,77 @@ depends on.
 
 ### 7.1 Hardening backlog (produced by the audit)
 
-Do not implement hardening before the audit lands, so the fixes are driven by findings rather than
-guesses. The audit turns its findings into this backlog; the items below are seeds already visible in
-the code, to be confirmed, reprioritised or dismissed by the audit.
+The audit is complete: see [`SECURITY_AUDIT_REPORT.md`](SECURITY_AUDIT_REPORT.md) — 5 High (P0), 11
+Medium (P1) and 11 Low (P2) findings, each with evidence, a recommendation and a verification step.
 
-- [ ] **SignalR authorization gap**: `JobsHub.Subscribe` adds the caller to a group named by a raw
-      `jobId` with no ownership check, while the REST job endpoints scope by `OwnerUserId`. Any
-      authenticated user who learns a job id can watch another user's render progress.
-- [ ] **No forwarded-headers handling**: behind Cloudflare + NGinx the rate limiter partitions on the
-      proxy's address (sharing one budget across all users), and `Request.IsHttps` / cookie `Secure` /
-      HTTPS redirection depend on the proxy telling the truth.
-- [ ] No antiforgery tokens, no CORS policy and no HSTS.
-- [ ] The Data Protection key ring at `{contentRoot}/keys` is unprotected at rest: whoever reads it can
-      decrypt every stored osu! refresh token.
-- [ ] The engine receives the osu! user token as a command-line argument (visible to other processes via
-      `ps` / `/proc`) and writes it into its own on-disk config.
-- [ ] Verify each accepted finding with a reproduction or a test, and record the reasoning for anything
-      deliberately left as-is.
-- [ ] Validate the fixes in the real deployment topology: Phase 8.1's container and reverse-proxy setup
-      is the environment the hardening must actually hold in.
+**P0 — before any public exposure (implemented):**
+
+- [x] **H-1** `JobsHub.Subscribe` verifies that the job belongs to the caller, and validates the job
+      id shape. Regression tests in `JobsHubAuthorizationTests`.
+- [x] **H-2** Forwarded headers with an explicit `Proxy:KnownProxies`/`KnownNetworks` trust list;
+      cookies always `Secure` outside Development; the rate limiter therefore keys on the forwarded
+      client address. Tests in `ProxyConfigurationTests`; the end-to-end cookie/partition check is a
+      documented manual step (`DEPLOYMENT.md` §5).
+- [x] **H-3** The key ring is created `0700` with existing key files tightened, and can be encrypted
+      at rest with `DataProtection:CertificatePath`. Tests in `FilePermissionsTests`.
+- [x] **H-4** Credentials moved off `argv` into an owner-only secrets file that the engine deletes
+      after reading; the injected token is cleared from engine config on exit; the log bridge redacts
+      the values. Tests in `SecretsChannelTests`.
+- [x] **H-5** Shipped `OsuUserIds` is empty (the personal id is gone) and first-login-wins is
+      replaced by a constant-time, one-shot, token-gated bootstrap. Tests in `BootstrapAdminTests`.
+
+**P1 — hardening (implemented):**
+
+- [x] **M-1** Preset `ConfigJson` is validated like a job config, capped at 16 KB, and limited to 50
+      presets per user (`PresetGuard`).
+- [x] **M-2** The metadata lookup takes a real 25 s deadline (it is cancelled rather than orphaned while
+      holding the render lock), and `POST /api/v1/jobs` has its own rate-limit partition.
+- [x] **M-3** CSP / `nosniff` / `Referrer-Policy` / `X-Frame-Options` are set on every response, HSTS is
+      added outside Development, and the SPA's inline `onclick` (and its one inline `style`) are gone, so
+      `script-src` and `style-src` stay at `'self'`.
+- [x] **M-4** The osu! token error body never reaches an exception or the log (only the short `error`
+      code), and a failed exchange redirects to `/auth/error` instead of returning a 500.
+- [x] **M-5** State-changing requests require a `X-LazerRender-Request` header — a second CSRF layer
+      behind `SameSite` (see `DEPLOYMENT.md` §12 for curl usage).
+- [x] **M-6** Skins stay a shared library, but deletion is restricted to the uploader or an admin
+      (decided by the project owner), and the Realm divergence is documented.
+- [x] **M-7** Engine/import log lines are redacted (known secrets plus bearer-token shapes),
+      length-capped, and bounded by a per-render byte budget.
+- [x] **M-8** Beatmap packages get their own size cap and archives are checked for bomb shapes before
+      import; `Renderer:DownloadMissing=false` and engine-user isolation are documented.
+- [x] **M-9** *Partial* — the service warns at startup while `AllowedHosts` is unrestricted. Setting it
+      to the real hostname is a deployment step (see `SECURITY_AUDIT_REPORT.md` and `DEPLOYMENT.md` §12).
+- [x] **M-10** Quota check and insert are serialised by `JobCreationGate`, and `jobs.DisplayNumber` now
+      has a unique index.
+- [x] **M-11** The session has an absolute lifetime (7 days, no sliding, plus an `auth_time` check in the
+      cookie validator).
+
+**P2 — low / hygiene (implemented):**
+
+- [x] **L-1** The engine's own `.osr` header parser bounds the hash length at 256, matching the service.
+- [x] **L-2** `job.id` is passed through `CSS.escape` in the one selector that lacked it.
+- [x] **L-3** `fetch-user-token.sh` prints only the refresh token, with a warning to treat it as a secret.
+- [x] **L-4** The runner-script search is confined to the content root outside Development (so a
+      writable ancestor cannot substitute the executed script), and the bare-name `setsid` PATH fallback
+      is refused there.
+- [x] **L-5** Swagger is `#if DEBUG` and its package reference is Debug-only, so Release bundles carry
+      neither.
+- [x] **L-6** Shared read-only listings remain by design; skin names are client-controlled and visible
+      to every authenticated user — documented in `DEPLOYMENT.md` §12.
+- [x] **L-7** `/auth/*` has its own, tighter rate-limit partition.
+- [x] **L-8** The OAuth `RedirectUri` default is empty and the service fails loudly at startup when
+      `ClientId` is set without one.
+- [x] **L-9** `AllowUser` no longer echoes an internal exception message; the detail is logged.
+- [x] **L-10** The systemd unit no longer points `Documentation=` at the osu! submodule, and the mirror
+      comment matches the code.
+- [x] **L-11** Central package management plus `packages.lock.json` for the service half, and the
+      transitive inventory recorded in `MAINTENANCE_INFRA_CONTEXT.md` §8 for the next submodule bump.
+
+Phase 7 is done: the audit's remaining items are the deliberate acceptances recorded in
+`SECURITY_AUDIT_REPORT.md` §8, and the deployment-side steps called out in the rows above.
+
+Each item is closed with its verification evidence: a test, a reproduction, or a written justification
+for accepting the risk.
 
 ## ⬜ Phase 8 — Docker, Observability & Release (Planned)
 

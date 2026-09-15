@@ -93,6 +93,41 @@ public sealed class RendererProcessRunnerLogTests
         }
     }
 
+    /// <summary>
+    /// M-7 (audit): engine output is derived from user-supplied inputs, so a single line is capped and
+    /// a credential shape is redacted before it is logged.
+    /// </summary>
+    [Fact]
+    public async Task Runaway_engine_output_is_length_capped_and_redacted()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        string dir = Directory.CreateTempSubdirectory("lazerrender-runner-").FullName;
+
+        try
+        {
+            string script = WriteScript(dir, """
+                #!/usr/bin/env bash
+                printf '[runtime] '
+                printf 'x%.0s' {1..3000}
+                printf ' Bearer SECRET-TOKEN-VALUE\n'
+                echo '{"type":"progress","phase":"DONE","frame":1,"total":1,"fps":0}'
+                """);
+
+            var log = new RecordingLogger();
+            await RunAsync(script, dir, log, onProgress: null);
+
+            Assert.Contains(log.Entries, e => e.Message.Contains("[truncated]"));
+            Assert.DoesNotContain(log.Entries, e => e.Message.Contains("SECRET-TOKEN-VALUE"));
+            Assert.DoesNotContain(log.Entries, e => e.Message.Contains("Bearer SECRET"));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private static string WriteScript(string dir, string contents)
     {
         string script = Path.Combine(dir, "fake-engine.sh");
@@ -120,7 +155,7 @@ public sealed class RendererProcessRunnerLogTests
 
         var invocation = new RenderInvocation(
             "job1", "/tmp/replay.osr", "/tmp/config.json", "/tmp/out", "/tmp/storage",
-            "cpu", DownloadMissing: false, AvatarApiKey: null, OsuUserToken: null, OsuUserTokenExpiresIn: 3600);
+            "cpu", DownloadMissing: false, SecretsFilePath: null, RedactedValues: Array.Empty<string>());
 
         return runner.RunAsync(invocation, CancellationToken.None, onProgress);
     }

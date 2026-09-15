@@ -1,6 +1,5 @@
 [Unit]
 Description=LazerRender web service
-Documentation=https://github.com/ppy/osu
 After=network-online.target
 Wants=network-online.target
 
@@ -24,6 +23,10 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/lazerrender/data /opt/lazerrender/keys
 LimitNOFILE=65536
+
+# The key ring decrypts every stored osu! token. The app enforces 0700 itself at startup; this is
+# belt-and-braces for hosts whose keys/ was created by an earlier version with a laxer umask.
+ExecStartPre=/bin/sh -c 'chmod 700 /opt/lazerrender/keys; chmod 600 /opt/lazerrender/keys/*.xml 2>/dev/null; true'
 
 [Install]
 WantedBy=multi-user.target

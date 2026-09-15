@@ -5,6 +5,7 @@ using LazerRender.Api.Services;
 using LazerRender.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace LazerRender.Api.Controllers;
@@ -16,12 +17,20 @@ public sealed class JobsController : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// How long job creation waits for beatmap metadata before giving up. The lookup is best-effort and
+    /// bounded so a slow mirror cannot pin a request (or leave orphaned work holding the render lock);
+    /// the worker re-resolves metadata after the render if it did not finish.
+    /// </summary>
+    private const int MetadataResolveTimeoutSeconds = 25;
+
     private readonly AppDbContext db;
     private readonly StorageService storage;
     private readonly QuotaService quota;
     private readonly JobCancellationService cancellation;
     private readonly EncoderResolver encoderResolver;
     private readonly MapMetadataService mapMetadata;
+    private readonly JobCreationGate creationGate;
 
     public JobsController(
         AppDbContext db,
@@ -29,7 +38,8 @@ public sealed class JobsController : ControllerBase
         QuotaService quota,
         JobCancellationService cancellation,
         EncoderResolver encoderResolver,
-        MapMetadataService mapMetadata)
+        MapMetadataService mapMetadata,
+        JobCreationGate creationGate)
     {
         this.db = db;
         this.storage = storage;
@@ -37,9 +47,11 @@ public sealed class JobsController : ControllerBase
         this.cancellation = cancellation;
         this.encoderResolver = encoderResolver;
         this.mapMetadata = mapMetadata;
+        this.creationGate = creationGate;
     }
 
     [HttpPost]
+    [EnableRateLimiting("jobs")]
     public async Task<ActionResult<JobCreatedResponse>> Create(CancellationToken ct)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -91,21 +103,15 @@ public sealed class JobsController : ControllerBase
                 $"Duration exceeds the {quota.MaxDurationSeconds}s limit."));
 
         var now = DateTimeOffset.UtcNow;
-        var quotaError = await quota.ValidateAsync(userId, now, ct);
-        if (quotaError is not null)
-            return StatusCode(StatusCodes.Status429TooManyRequests, new ErrorResponse("quota_exceeded", quotaError));
 
-        // Monotonic, human-facing render number. Single-instance MAX+1 is sufficient for the MVP;
-        // a dedicated sequence table would be needed for multi-host correctness.
-        var displayNumber = (await db.Jobs.MaxAsync(j => (int?)j.DisplayNumber, ct) ?? 0) + 1;
-
+        // The job entity is created up front so the staged replay can be named after its id, but the
+        // row is not inserted until the input has been validated and the quota gate has been taken.
         var job = new JobEntity
         {
             OwnerUserId = userId,
             // The job is not claimable until its beatmap metadata has been resolved (see below), so
             // the UI shows the real title immediately instead of the "Replay by <player>" fallback.
             Status = JobStatus.Uploaded,
-            DisplayNumber = displayNumber,
             SkinName = skin,
             RenderConfigJson = JsonSerializer.Serialize(renderConfig, JsonOptions),
             Encoder = encoderResolver.Resolve(),
@@ -129,17 +135,35 @@ public sealed class JobsController : ControllerBase
         job.ReplayMd5 = header.BeatmapMd5;
         job.PlayerUsername = header.PlayerUsername;
 
-        db.Jobs.Add(job);
-        await db.SaveChangesAsync(ct);
+        // The quota check and the insert are separate statements, so two concurrent requests from one
+        // user could each pass the cap. Take the creation gate across both. The quota stays advisory:
+        // the worker's atomic claim is what really bounds concurrent renders.
+        using (await creationGate.AcquireAsync(ct))
+        {
+            var quotaError = await quota.ValidateAsync(userId, now, ct);
+            if (quotaError is not null)
+            {
+                storage.DeleteStagedReplay(job.Id);
+                return StatusCode(StatusCodes.Status429TooManyRequests, new ErrorResponse("quota_exceeded", quotaError));
+            }
 
-        // Resolve beatmap metadata before the job becomes claimable. The worker cannot claim an
-        // Uploaded job, so the shared render lock is free for the lookup and the title is available
-        // by the time the client refreshes the list. Best-effort: a failed lookup leaves the job on
-        // its "Replay by <player>" fallback and the worker re-resolves after the render. The wait is
-        // bounded so a slow beatmap download can never hang the request; if it does not finish in
-        // time the resolution keeps running in the background and updates the job when it completes.
-        var resolve = mapMetadata.ResolveAndUpdateAsync(job.Id, header.BeatmapMd5);
-        await Task.WhenAny(resolve, Task.Delay(TimeSpan.FromSeconds(25)));
+            // Monotonic, human-facing render number, allocated inside the gate so two requests cannot
+            // take the same value; a unique index backs this at the database level. Single-instance
+            // is sufficient for the MVP; a sequence table would be needed for multi-host correctness.
+            job.DisplayNumber = (await db.Jobs.MaxAsync(j => (int?)j.DisplayNumber, ct) ?? 0) + 1;
+
+            db.Jobs.Add(job);
+            await db.SaveChangesAsync(ct);
+        }
+
+        // Resolve beatmap metadata before the job becomes claimable, but with a real deadline: the wait
+        // is bounded so a slow beatmap download can never hang the request, and the lookup is actually
+        // cancelled rather than left running while holding the shared render lock.
+        using (var resolveCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            resolveCts.CancelAfter(TimeSpan.FromSeconds(MetadataResolveTimeoutSeconds));
+            await mapMetadata.ResolveAndUpdateAsync(job.Id, header.BeatmapMd5, resolveCts.Token);
+        }
 
         job.Status = JobStatus.Queued;
         await db.SaveChangesAsync(ct);

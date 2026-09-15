@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using LazerRender.Api.Data;
+using LazerRender.Api.Services;
 using LazerRender.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -46,6 +47,12 @@ public sealed class PresetsController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.ConfigJson))
             return BadRequest(new ErrorResponse("config_required"));
 
+        // A preset is a small settings document; without this an authenticated user could store the
+        // full body-limit per preset and inflate every preset listing. See PresetGuard.
+        string? configError = PresetGuard.Validate(request.ConfigJson);
+        if (configError is not null)
+            return BadRequest(new ErrorResponse("invalid_config", configError));
+
         var name = string.IsNullOrWhiteSpace(request.Name) ? "Unnamed preset" : request.Name.Trim();
         if (name.Length > 64)
             name = name[..64];
@@ -55,6 +62,18 @@ public sealed class PresetsController : ControllerBase
 
         if (existing is not null && !request.Overwrite)
             return Conflict(new ErrorResponse("preset_exists", $"A preset named \"{name}\" already exists."));
+
+        if (existing is null)
+        {
+            var count = await db.Presets.CountAsync(p => p.OwnerUserId == userId, ct);
+
+            if (count >= PresetGuard.MaxPresetsPerUser)
+            {
+                return BadRequest(new ErrorResponse(
+                    "preset_limit_reached",
+                    $"You already have {count} presets; the limit is {PresetGuard.MaxPresetsPerUser}."));
+            }
+        }
 
         var preset = existing ?? new PresetEntity { OwnerUserId = userId, Name = name };
         preset.ConfigJson = request.ConfigJson;
