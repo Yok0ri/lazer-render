@@ -1,0 +1,82 @@
+# LazerRender — compose stack for Portainer / docker compose.
+#
+#   docker compose up -d --build
+#
+# Create a .env beside this file (or paste the variables into the Portainer stack) with at least
+# OSU_CLIENT_ID, OSU_CLIENT_SECRET, OSU_REDIRECT_URI and ALLOWED_HOSTS.
+#
+# Runtime data and the key ring are named volumes, so replacing the image never touches them, and the
+# key ring never ends up in an image layer.
+
+services:
+  lazerrender:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lazerrender:latest
+    container_name: lazerrender
+    restart: unless-stopped
+
+    # Reaps the engine/weston/ffmpeg children the render loop leaves behind. Without an init the service
+    # is PID 1 and those orphans become zombies; process-group cancellation itself works either way
+    # (the runner still signals the whole group).
+    init: true
+
+    # Non-default host port: the usual suspects are taken by the other stacks in this Portainer.
+    ports:
+      - "5180:5080"
+
+    # The default 64 MB /dev/shm is too small once the compositor and client start sharing buffers:
+    # a single 3840x2160 RGBA frame alone is ~33 MB. Rendering at 1440p/4K can exhaust it.
+    shm_size: "1gb"
+
+    # Only the render nodes, not the card nodes — least privilege for EGL/VAAPI. They are world-readable
+    # on the host, so the container user needs no extra group.
+    #
+    # Pass only the node of the GPU you actually want to render on: Mesa enumerates whatever it can see
+    # and does not necessarily pick the discrete card (with both nodes exposed on a hybrid AMD host, the
+    # engine rendered on the integrated GPU). Map them with `ls -l /dev/dri/by-path/` and confirm via
+    # `cat /sys/class/drm/renderD128/device/uevent` before changing this list.
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+
+    volumes:
+      - lazerrender-data:/app/data
+      - lazerrender-keys:/app/keys
+
+    environment:
+      # osu! OAuth application. RedirectUri is mandatory once ClientId is set — the service refuses to
+      # start without it rather than shipping a localhost default.
+      Osu__OAuth__ClientId: "${OSU_CLIENT_ID:-}"
+      Osu__OAuth__ClientSecret: "${OSU_CLIENT_SECRET:-}"
+      Osu__OAuth__RedirectUri: "${OSU_REDIRECT_URI:-}"
+
+      # The public name this instance is served under (the Host header) — your Cloudflare domain.
+      # It is not a bind address and it is not baked into the source; set it per deployment.
+      AllowedHosts: "${ALLOWED_HOSTS:-*}"
+
+      # Who gets admin. Preferred over the one-shot Admin__BootstrapToken.
+      Admin__OsuUserIds: "${ADMIN_OSU_USER_IDS:-}"
+
+      # Only these addresses may assert X-Forwarded-Proto/For. Forwarded headers from anywhere else are
+      # ignored, which is what keeps the rate limiter honest — but it also means a proxy that is not
+      # listed here will leave TLS-looking requests looking like plain HTTP and cookies not `Secure`.
+      # See DEPLOYMENT.md §12: a proxy on the host usually arrives from the docker bridge gateway
+      # (e.g. 172.17.0.1); a proxy in this compose network arrives from its container address, in which
+      # case list the subnet in Proxy__KnownNetworks instead.
+      Proxy__KnownProxies: "${KNOWN_PROXIES:-127.0.0.1,::1}"
+      Proxy__KnownNetworks: "${KNOWN_NETWORKS:-}"
+
+      # Optional fallback osu! bot credential (a user refresh token issued to this application).
+      Renderer__OsuBotRefreshToken: "${OSU_BOT_REFRESH_TOKEN:-}"
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  lazerrender-data:
+  lazerrender-keys:

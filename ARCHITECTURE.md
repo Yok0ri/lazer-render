@@ -55,6 +55,9 @@ LazerRender/
 ├── MAINTENANCE.md                   Routine-workflow notes (WIP)
 ├── SECURITY_AUDIT_CONTEXT.md        Hand-off briefing for the Phase 7 security audit
 ├── MAINTENANCE_INFRA_CONTEXT.md     Hand-off briefing for the Phase 8 observability design
+├── Dockerfile                       Two-stage image holding both halves (section 1.6)
+├── docker-compose.yml               Compose stack for Docker / Portainer (section 1.6)
+├── .dockerignore                    Keeps build output, runtime data and dev/ out of the context
 ├── .gitignore                       Excludes runtime data, dev/ notes and editor config
 ├── .gitmodules                      Pins LazerRender.Game/extern/osu
 ├── LazerRender.Game/                The engine — self-contained, expanded in 2.2
@@ -105,6 +108,14 @@ LazerRender.Service/scripts/publish-service.sh linux-x64    # self-contained pub
 In development the service listens on `http://localhost:5080` (Swagger at `/swagger`, SPA at `/`,
 API under `/api/v1`) and writes runtime data to `LazerRender.Service/src/LazerRender.Api/data/`
 (gitignored).
+
+**Containers**
+
+```bash
+docker compose up -d --build          # host port 5180 -> container 5080
+```
+
+See section 1.6.
 
 ### 1.4 The big picture (end to end)
 
@@ -159,6 +170,40 @@ job rows + progress events. The `--render-config` JSON the service writes is exa
 [`WEB_GUI_GUIDE.md`](LazerRender.Game/WEB_GUI_GUIDE.md), mirrored by
 [`RenderConfig`](LazerRender.Service/src/LazerRender.Contracts/RenderConfig.cs:10). The full
 end-to-end path is in section 3.11.
+
+### 1.6 The container image
+
+The [`Dockerfile`](Dockerfile) is a two-stage build that produces **one** image containing both
+halves, because the service cannot function without the engine and they are versioned together:
+
+```
+build stage (mcr.microsoft.com/dotnet/sdk:8.0)
+  dotnet publish LazerRender.Game  -c Release -r linux-x64 -> /out/engine
+  dotnet publish LazerRender.Api   -c Release -r linux-x64 -> /out/api
+
+runtime stage (mcr.microsoft.com/dotnet/aspnet:8.0)
+  /app/                                  <- /out/api   (content root; ASPNETCORE_CONTENTROOT=/app)
+  /app/LazerRender.Game/publish/         <- /out/engine
+  /app/LazerRender.Game/scripts/run-headless.sh
+  /app/data   (volume)   /app/keys   (volume, mode 0700, owner-only)
+  USER lazerrender (uid 10001)   EXPOSE 5080
+```
+
+Two properties matter more than the layout:
+
+- **The engine ships as a *published* app, not as source.** `LAZERRENDER_ENGINE` is set to
+  `/app/LazerRender.Game/publish/LazerRender.dll`, which switches `run-headless.sh` into its prebuilt
+  mode (section 2.11). That is what keeps the SDK, the source tree and the pinned osu! submodule out of
+  the running image, and it is why the image needs only the .NET runtime.
+- **The key ring is a volume, never a layer.** `/app/keys` holds the Data Protection key that decrypts
+  every stored osu! credential, so it is created `0700` at build time and only ever mounted. Same for
+  `/app/data` (SQLite, uploads, results, the engine's Realm storage).
+
+`docker-compose.yml` wraps the image with GPU render nodes (`/dev/dri/renderD*` only), `shm_size: 1gb`,
+the `.env`-driven settings, and a `/health` healthcheck; it publishes on host port **5180** to avoid
+clashing with neighbouring stacks. The operational detail — device-node selection on multi-GPU hosts,
+the reverse-proxy/forwarded-header consequences of a container network, and verifying that a render
+actually runs on the GPU — is in [`DEPLOYMENT.md`](LazerRender.Service/DEPLOYMENT.md) §11.
 
 ---
 
@@ -619,6 +664,9 @@ Spawns a single FFmpeg process and feeds it video (stdin) and audio (a named FIF
   shifted) and adds it to a bounded video queue (capacity 3).
 - [`WriteAudio`](LazerRender.Game/FrameSink.cs:141): copies PCM into an unbounded audio queue.
 - `startProcess` builds the FFmpeg arguments:
+  - `-analyzeduration 0 -probesize 32` before *each* `-i`: both inputs are fully described on the
+    command line, and letting FFmpeg analyse them instead is what deadlocks the pipeline on FFmpeg
+    5.1 (section 2.8, item 3).
   - `buildHardwareInitArgs`: `-vaapi_device /dev/dri/renderD128` (AMD) or `-init_hw_device qsv=hw
     -filter_hw_device hw` (Intel).
   - `buildVideoFilterArgs`: merges the `tmix` motion-blur filter with the backend's
@@ -723,7 +771,7 @@ only the listed components are shown, every other HUD component is hidden. The k
 `--disable-storyboard` (= `--no-storyboard`), `--disable-video` (= `--no-video`),
 `--hide-overlay` (= `--hud-visibility never`).
 
-### 2.8 Concurrency and the two pipeline deadlocks (historical context)
+### 2.8 Concurrency and the three pipeline deadlocks (historical context)
 
 The video pipeline is a chain of bounded queues with a single blocking point (the FFmpeg stdin
 write):
@@ -735,7 +783,7 @@ draw thread (glReadPixels + PBO copy)
       → FFmpeg stdin
 ```
 
-Two deadlocks were fixed over time:
+Three deadlocks were fixed over time:
 
 1. **90 fps lazy-start deadlock.** FFmpeg used to start lazily on the first frame; at 90 fps the
    startup burst filled the queues and deadlocked (FFmpeg waited for audio, video backpressure
@@ -745,9 +793,19 @@ Two deadlocks were fixed over time:
    which deadlocked the bounded queues. Fix: remove `-shortest` (the recorder closes both inputs at
    `Finish`), and add the `readbackSlots` semaphore so the recorder loop throttles to FFmpeg instead
    of blocking the draw thread.
+3. **Stream-analysis startup deadlock (FFmpeg 5.1 only).** Before transcoding, FFmpeg reads a chunk of
+   *every* input to work out what it is — and the audio FIFO is still empty at that point, because the
+   recorder has not captured its first frame yet. On FFmpeg 5.1 (what Debian 12 ships) that read
+   blocks, so FFmpeg never starts draining the video pipe, the bounded queues fill and the render
+   wedges on frame one (`frame:0`, ffmpeg single-threaded and blocked in a read, the engine's video
+   writer blocked in a pipe write). FFmpeg 9.x does not behave this way, which is why it only showed
+   up inside the container image. Fix: pass `-analyzeduration 0 -probesize 32` before each `-i` in
+   [`FfmpegFrameSink.startProcess`](LazerRender.Game/FrameSink.cs:152); both inputs are fully described
+   on the command line (`-f`, `-s`, `-pix_fmt`, `-ar`, `-ac`), so the analysis is unnecessary anyway.
 
 The invariant now: **the draw thread never blocks on a full queue**; backpressure is absorbed by the
-semaphore in `CaptureAsync`, which paces the recorder loop gracefully.
+semaphore in `CaptureAsync`, which paces the recorder loop gracefully — and FFmpeg must never block on
+an *empty* input, which is what rule 3 guarantees.
 
 ### 2.9 External dependencies (engine)
 
@@ -808,10 +866,21 @@ component containers, so a new key only needs to match types that appear there.
 
 ### 2.11 Scripts (engine)
 
-- [`LazerRender.Game/scripts/run-headless.sh`](LazerRender.Game/scripts/run-headless.sh:1) — starts `weston --backend=headless
-  --renderer=gl` on a unique Wayland socket, waits for the socket, runs
-  `dotnet run --project .../LazerRender.Game.csproj -- <args>`, and tears Weston down. Honors
-  `LAZERRENDER_MESA_DRIVER` to force a Mesa driver.
+- [`LazerRender.Game/scripts/run-headless.sh`](LazerRender.Game/scripts/run-headless.sh:1) — stands up a
+  throwaway Weston compositor, runs the engine against it, and tears the compositor down. Details that
+  are easy to get wrong:
+  - **Weston's flags are probed, not hard-coded.** Weston 10 names backends by module file
+    (`--backend=headless-backend.so`) and only knows `--use-gl`; newer releases accept the short
+    `headless` name and prefer `--renderer=gl`. The script reads `weston --help` and picks a spelling
+    that works on both, so the same script runs on a desktop distro and inside the container image.
+  - **`XDG_RUNTIME_DIR` is exported.** Weston hard-fails without it, so when the variable is unset the
+    script falls back to a secured per-user tmpdir *and exports it* — which is the case that matters
+    inside a container.
+  - **Weston output is logged, not discarded**, and printed if the socket never appears.
+  - **Two run modes.** By default it runs `dotnet run --project .../LazerRender.Game.csproj -- <args>`
+    (what a development checkout uses). When `LAZERRENDER_ENGINE` points at a published
+    `LazerRender.dll`, it runs that instead, so the container host needs no SDK and no source tree.
+  - Honors `LAZERRENDER_MESA_DRIVER` to force a Mesa driver (e.g. `zink` to route OpenGL over Vulkan).
 - [`LazerRender.Game/scripts/fetch-bearer-token.sh`](LazerRender.Game/scripts/fetch-bearer-token.sh:1) — performs the
   osu! API v2 OAuth **client-credentials** grant (`scope=public`) and prints the access token.
   Requires `OSU_OAUTH_CLIENT_ID` and `OSU_OAUTH_CLIENT_SECRET` environment variables (never

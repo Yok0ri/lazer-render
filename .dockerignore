@@ -1,0 +1,32 @@
+# Keep the build context to source only.
+#
+# The context is the repository root because the engine build needs the pinned submodule under
+# LazerRender.Game/extern/osu. Everything here is either build output, runtime data, or
+# developer-only material that must not reach the image.
+
+# Build output (forces a clean build inside the image and keeps the context small)
+**/bin/
+**/obj/
+**/out/
+LazerRender.Service/publish/
+
+# Runtime data. The key ring decrypts every stored osu! credential, so it must never enter a layer.
+storage/
+LazerRender.Game/storage/
+LazerRender.Service/src/LazerRender.Api/data/
+LazerRender.Service/src/LazerRender.Api/keys/
+**/keys/
+
+# Local state and scratch
+dev/
+.zed/
+.vs/
+.idea/
+**/.git/
+**/.git
+*.log
+*.mp4
+*.mkv
+*.webm
+.env
+**/*.local.json

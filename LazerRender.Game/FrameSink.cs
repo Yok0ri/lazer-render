@@ -159,11 +159,21 @@ namespace LazerRender
             string videoFilterArgs = buildVideoFilterArgs();
             string encoderArgs = buildEncoderArgs();
 
+            // Both inputs are described completely on the command line, so FFmpeg never needs to
+            // probe or analyse either of them. Disabling that analysis is not just an optimisation:
+            // before transcoding, FFmpeg reads a chunk of *every* input to work out what it is, and
+            // the audio FIFO is still empty at that moment because the recorder has not captured its
+            // first frame yet. That read blocks, so FFmpeg never starts draining the video pipe, the
+            // engine's bounded queues fill up, and the whole render wedges on frame one. FFmpeg 5.1
+            // (Debian 12) behaves this way; 9.x does not. Always pass this explicitly rather than
+            // depending on the distro's defaults. -probesize 32 is the documented minimum.
+            const string inputAnalysisArgs = @"-analyzeduration 0 -probesize 32 ";
+
             // loglevel info (plus -hide_banner) keeps FFmpeg's periodic `fps=`/`speed=` progress
             // lines on stderr so the sink can surface encoder throughput for diagnostics.
             string arguments =
-                $@"-y -loglevel info -hide_banner {hardwareInitArgs}-f rawvideo -pix_fmt rgba -s {width}x{height} -r {fps} -i pipe:0 " +
-                $@"-f s16le -ar {audioSampleRate} -ac {audioChannels} -i ""{audioFifoPath}"" " +
+                $@"-y -loglevel info -hide_banner {hardwareInitArgs}{inputAnalysisArgs}-f rawvideo -pix_fmt rgba -s {width}x{height} -r {fps} -i pipe:0 " +
+                $@"{inputAnalysisArgs}-f s16le -ar {audioSampleRate} -ac {audioChannels} -i ""{audioFifoPath}"" " +
                 $@"-map 0:v -map 1:a {videoFilterArgs}{encoderArgs}-c:a aac -b:a 192k ""{outputPath}""";
 
             process = new Process

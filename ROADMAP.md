@@ -126,7 +126,7 @@ This document outlines the phased development plan for building a headless, fast
       visible (the `Request to https://dev.ppy.sh/api/v2/me/ failed with Unauthorized` line), and the
       authorize URL / OAuth scopes / engine output are all logged now.
 
-## ⬜ Phase 7 — Security Audit & Hardening (Planned)
+## ✅ Phase 7 — Security Audit & Hardening (Completed)
 
 The full security audit — threat model, authn/authz review, rate limiting, upload handling, secret
 handling and the exposure of a Cloudflare + NGinx-fronted public deployment — will be performed by
@@ -209,28 +209,57 @@ Phase 7 is done: the audit's remaining items are the deliberate acceptances reco
 Each item is closed with its verification evidence: a test, a reproduction, or a written justification
 for accepting the risk.
 
-## ⬜ Phase 8 — Docker, Observability & Release (Planned)
+## 🚧 Phase 8 — Docker, Observability & Release (8.1 complete)
 
-The detailed design (compose stack, image layering, logging/instrumentation design, debugging workflow)
-is to be produced by a more capable model first; this phase records the scope, constraints and the parts
-that are already clear. `MAINTENANCE_INFRA_CONTEXT.md` is the hand-off briefing for that design work.
+Sub-phase 8.1 is implemented and verified. The logging/instrumentation design, the debugging workflow
+and the observability panel (8.2–8.4) are still to be designed by a more capable model; this phase
+records their scope and constraints. `MAINTENANCE_INFRA_CONTEXT.md` is the hand-off briefing for that
+design work.
 
-### 8.1 Docker deployment
+### 8.1 Docker deployment ✅
 
-- [ ] Package the service as a container image plus a `docker-compose` service that drops into the
-      existing Portainer stacks (currently Jellyfin and Nextcloud).
-- [ ] Assign a non-default host port so the stack cannot clash with those services.
-- [ ] Public access follows the existing pattern: Cloudflare domain → NGinx reverse proxy → this
-      service. Cover TLS/forwarded-headers handling, and reuse the existing `/health` endpoint for
-      container and proxy health checks.
-- [ ] Work out which codebase changes are actually required for containerisation: GPU access for
-      VAAPI/NVENC (`/dev/dri` passthrough), the headless rendering path inside the image, volumes for
-      the Realm/beatmap storage and results, and keeping every credential in the environment.
-- [ ] Confirm the render worker's process-group cancellation still behaves correctly when it is PID 1
-      inside a container.
-- [ ] Settle the deployment shape that Phase 8.3's **Render PC** card will report on — container-visible
-      CPU/RAM versus host, GPU passthrough, and the FFmpeg build and .NET runtime inside the image — so
-      the card is designed against the environment that actually ships rather than a bare-metal host.
+- [x] Package the service as a container image plus a `docker-compose` service that drops into the
+      existing Portainer stacks. One image holds both halves — the service at the content root `/app`
+      and the engine as a *prebuilt* publish at `/app/LazerRender.Game/publish/` (the
+      `LAZERRENDER_ENGINE` mode of `run-headless.sh`), so the running container needs no SDK, no source
+      tree and therefore no osu! submodule.
+- [x] Assign a non-default host port: compose publishes **5180**.
+- [x] Cover TLS/forwarded-headers handling and reuse `/health`. `DEPLOYMENT.md` §11 documents the
+      container topology's extra wrinkle — the proxy's apparent address is the docker bridge gateway
+      (a host proxy) or the compose subnet (a proxy container), so `Proxy__KnownProxies` /
+      `Proxy__KnownNetworks` must be set or `Secure` cookies and per-client rate limiting silently
+      break. `/health` serves as both the container healthcheck and the proxy upstream check.
+- [x] Required codebase changes: GPU access by passing **render nodes only** (`/dev/dri/renderD*`,
+      least privilege), the headless render path inside the image, named volumes for `/app/data`
+      (SQLite + uploads + results + the engine's Realm storage) and `/app/keys` (the Data Protection
+      key ring, `0700`, never an image layer), and every credential left in the environment.
+- [x] Process-group cancellation / PID 1. compose sets `init: true`, so the service is **not** PID 1
+      and cancellation is unchanged from bare metal; a bare `docker run` needs `--init` for the same
+      shape. Shutdown was verified live: `stop` on a running service container exits `0` with
+      "Application is shutting down..." well inside the grace period.
+- [x] Settle the deployment shape for 8.3's **Render PC** card. The card must be designed against the
+      *container*, not the host: Debian bookworm base, .NET 8.0.31 (ASP.NET Core runtime), **FFmpeg
+      5.1.9** from Debian (report it — it is a behavioural variable, see 8.1 notes below), Mesa 25.0.7
+      and Weston 14.0.2 from `bookworm-backports`, only the render nodes the operator passed, and
+      cgroup-visible CPU/RAM rather than host totals. `/dev/shm` must be ≥1 GB for 1440p/4K.
+
+**Verification evidence.** A 38 s test replay rendered *inside the container* at ~270 fps — identical
+to the same replay on bare metal — producing a valid 1280×720@60 h264 + AAC 44.1 kHz MP4 of the same
+length and size. `/health` returns 200 with the CSP and security headers, `/app/keys` is `0700` with
+`0600` key files, and the service test suite is green (91/91).
+
+**Non-obvious blockers found here** (all fixed; details in `ARCHITECTURE.md` §2.8 and §2.11):
+
+- Bookworm's Mesa 22.3 cannot drive a current GPU (the test host is an AMD RDNA4 / `gfx1200` part) and
+  its Weston 10 wedges the capture pipeline, so the image pulls Mesa 25.x / Weston 14.x from
+  `bookworm-backports`.
+- `run-headless.sh` never exported `XDG_RUNTIME_DIR`, and hard-coded Weston ≥ 11's
+  `--backend=headless --renderer=gl`. Both are fatal in a container; the script now exports the
+  runtime dir and probes `weston --help` for the flags.
+- Debian's FFmpeg 5.1 analyses every input before transcoding, blocks on the still-empty audio FIFO,
+  and never drains the video pipe — a hard deadlock on `frame:0`. Fixed in the engine by passing
+  `-analyzeduration 0 -probesize 32` before each input. **This is a real behavioural dependency on the
+  FFmpeg build**, which is why 8.3's Render PC card should report the FFmpeg version.
 
 ### 8.2 Logging & instrumentation core
 

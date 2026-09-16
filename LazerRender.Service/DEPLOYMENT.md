@@ -1,6 +1,8 @@
 # LazerRender Service — Deployment
 
-## 1. Two execution modes
+## 1. Execution modes
+
+Three modes are supported. This section covers the two bare-metal ones; the container stack is §11.
 
 ### Development (framework-dependent)
 
@@ -34,6 +36,12 @@ The deployment directory is `LazerRender.Service/publish/`. Copy it to the serve
 ```bash
 cd /opt/lazerrender && ./LazerRender.Api
 ```
+
+### Containers (Docker / Podman)
+
+`docker compose up -d --build` from the repo root builds one image holding both the service and the
+engine and runs it with GPU passthrough. See §11 for the compose stack, volumes, GPU device nodes and
+the reverse-proxy/forwarded-headers consequences of running behind a container network.
 
 ## 2. Configuration
 
@@ -252,6 +260,134 @@ HTTP and the proxy's address, which means:
 
 The app never trusts forwarded headers from an address it was not told about, so a client connecting
 directly cannot spoof them to evade the limiter.
+
+## 11. Containers (Docker / Podman + compose)
+
+The repository root carries a two-stage [`Dockerfile`](../Dockerfile) and a
+[`docker-compose.yml`](../docker-compose.yml) stack. One image holds both halves: the service (API and
+render worker) published into `/app`, and the engine published as a *prebuilt*, framework-dependent
+application under `/app/LazerRender.Game/publish/`. The render host therefore needs only the ASP.NET
+Core runtime — no SDK, no source tree and no osu! submodule (see §4 for what a publish bundle carries,
+and [`run-headless.sh`](../LazerRender.Game/scripts/run-headless.sh) for the `LAZERRENDER_ENGINE` path
+that runs a published engine instead of `dotnet run`).
+
+### Quick start
+
+```bash
+docker compose up -d --build
+curl -fsS http://127.0.0.1:5180/health
+```
+
+The stack serves on **host port 5180** — deliberately not 5080, so it cannot collide with another
+service on the host. `docker compose` and `podman-compose` both work.
+
+### Environment
+
+The compose file maps the same settings §2 documents, from a `.env` beside it (or straight into the
+Portainer stack):
+
+| compose variable | app setting |
+|---|---|
+| `OSU_CLIENT_ID` / `OSU_CLIENT_SECRET` | `Osu:OAuth:ClientId` / `:ClientSecret` |
+| `OSU_REDIRECT_URI` | `Osu:OAuth:RedirectUri` — required once `ClientId` is set |
+| `ALLOWED_HOSTS` | `AllowedHosts` — the public hostname the instance is served under |
+| `ADMIN_OSU_USER_IDS` | `Admin:OsuUserIds` |
+| `KNOWN_PROXIES` / `KNOWN_NETWORKS` | `Proxy:KnownProxies` / `Proxy:KnownNetworks` — see below |
+| `OSU_BOT_REFRESH_TOKEN` | `Renderer:OsuBotRefreshToken` (optional fallback credential) |
+
+Nothing above is baked into the image; every value is supplied per deployment.
+
+### GPU passthrough
+
+Only the **render** nodes are passed, and only the ones belonging to the GPU you want to render on.
+Mesa enumerates every render node it can see and does not necessarily pick the discrete card — on a
+host with both an integrated and a discrete AMD GPU, exposing both made the engine render on the
+iGPU. Map the nodes on the host first:
+
+```bash
+ls -l /dev/dri/by-path/                        # which renderD* is which PCI device
+cat /sys/class/drm/renderD128/device/uevent    # confirm with PCI_ID / PCI_SLOT_NAME
+```
+
+The shipped compose file passes `/dev/dri/renderD128` alone; change that line if your card is on a
+different node. The nodes are mode `crw-rw-rw-`, so the container user needs no extra group.
+
+### Shared memory
+
+compose sets `shm_size: 1gb`. The default 64 MB `/dev/shm` is too small once the compositor and its
+client are sharing buffers — a single 3840x2160 RGBA frame is already ~33 MB — so 1440p and 4K renders
+can fail without it. A bare `docker run` needs the equivalent `--shm-size=1g`.
+
+### Volumes and the key ring
+
+The two named volumes are mandatory and never image layers:
+
+- `lazerrender-data` → `/app/data` — SQLite database, staged uploads, results, and the engine's Realm
+storage (`data/realm`);
+- `lazerrender-keys` → `/app/keys` — the Data Protection key ring that decrypts every stored osu!
+credential.
+
+The image creates `/app/keys` as `0700` and the service writes each key file as `0600`. Replacing the
+image never touches either volume, and `docker image history` cannot reveal a credential. Do not bind
+this path to a directory on a shared volume, and do not check it into an image build.
+
+### Reverse proxy in the container topology
+
+Keep the §10 rule in mind, because containers change the proxy's apparent address. Forwarded headers
+are only trusted from an address listed in `Proxy:KnownProxies` (or covered by
+`Proxy:KnownNetworks`), which defaults to `127.0.0.1,::1`:
+
+- a proxy on the **host** reaches the container from the docker bridge gateway (usually `172.17.0.1`);
+- a proxy in the **same compose network** reaches it from its own container address, in which case list
+  that subnet in `Proxy:KnownNetworks` (e.g. `172.18.0.0/16`).
+
+Get this wrong and the symptoms are exactly the ones in §10: cookies issued without `Secure`, and
+every request counted as one client by the rate limiter. The reverse-proxy chain itself is unchanged:
+Cloudflare domain → NGinx → `host:5180`, and the container's `/health` is suitable for both the
+docker/podman healthcheck and the proxy's upstream check.
+
+### PID 1 and shutdown
+
+compose sets `init: true`, so a small init (tini) is PID 1 and reaps the engine/compositor/FFmpeg
+children the render loop leaves behind. With a bare `docker run`, pass `--init` for the same behaviour.
+Process-group cancellation of a running render works either way — the runner signals the whole group,
+not just the direct child.
+
+### Why Mesa and Weston come from bookworm-backports
+
+The image is built on the bookworm-based .NET 8 images, but bookworm's Mesa 22.3 and Weston 10 predate
+current GPU families: Mesa 22.3 cannot drive an AMD RDNA4 (`gfx1200`) part at all, and the engine's
+capture pipeline wedges on the first frame under Weston 10. The Dockerfile therefore installs Mesa 25.x
+and Weston 14.x from `bookworm-backports` (only those, plus their direct dependencies — no libc bump).
+
+### Verifying the render path
+
+A render is the only honest test of GPU passthrough. Run one inside the container against a test replay
+and confirm the frames come out at hardware speed:
+
+```bash
+docker run --rm --shm-size=1g \
+  --device /dev/dri/renderD128 \
+  -v "$PWD/LazerRender.Game/tests:/tests:ro" \
+  -v /tmp/lr-storage:/storage -v /tmp/lr-out:/out \
+  --entrypoint /app/LazerRender.Game/scripts/run-headless.sh \
+  lazerrender:latest --replay /tests/replay_nm_short.osr \
+      --storage /storage --output /out --encoder cpu --download-missing
+```
+
+Healthy output is a `{"type":"progress",...,"fps":200+}` stream followed by `output.mp4`. If it
+stalls on `frame:0`, the engine is almost certainly not on a working GL path: the engine logs
+`Capture renderer backend: osu.Framework.Graphics.OpenGL.GLRenderer` and the GPU it picked in
+`LazerRender.Game/storage/logs/*.runtime.log`. Notes:
+
+- `radeonsi` may print `'gfxNNNN' is not a recognized processor ... LLVM doesn't support gfxNNNN,
+  bailing out` on very new GPUs, because the backports Mesa is still built against LLVM 15. It is
+  noise as long as a GL context comes up, but it is a real fallback path.
+- If hardware GL cannot be brought up at all, `LAZERRENDER_MESA_DRIVER=zink` (documented in
+  [`run-headless.sh`](../LazerRender.Game/scripts/run-headless.sh)) runs the engine's OpenGL on top of
+  Vulkan/RADV instead. `vulkaninfo` and `glxinfo` are *not* installed in the released image; add
+  `vulkan-tools` / `mesa-utils` for a one-off debugging container.
+- The image is `linux/amd64` only, and the engine publishes for `linux-x64`.
 
 ## 12. Hardening notes
 

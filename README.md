@@ -18,6 +18,9 @@ command-line interface, and the bundled ASP.NET Core web service
 - [`LazerRender.Service`](LazerRender.Service) – the ASP.NET Core web API + single-page frontend.
 - [`LazerRender.Service/src/LazerRender.Contracts`](LazerRender.Service/src/LazerRender.Contracts) –
   shared DTOs and enums used by the API and any future client.
+- [`Dockerfile`](Dockerfile) / [`docker-compose.yml`](docker-compose.yml) – one image containing both
+  halves plus the compose stack for Docker/Portainer. See
+  [`DEPLOYMENT.md`](LazerRender.Service/DEPLOYMENT.md) §11.
 
 ## Pinning
 
@@ -103,11 +106,19 @@ LazerRender.Game/scripts/run-headless.sh --replay LazerRender.Game/tests/replay_
     --output out --storage LazerRender.Game/storage --fps 60 --width 1920 --height 1080 --encoder amd
 ```
 
-The script creates an isolated Wayland socket, starts `weston --backend=headless --renderer=gl`, runs
-LazerRender against it (all arguments pass through unchanged), and tears Weston down afterwards. No
-window appears on the desktop. The `--renderer=gl` flag is what keeps Mesa from falling back to the
-software `llvmpipe` driver; set `LAZERRENDER_MESA_DRIVER` (e.g. `radeonsi` for AMD, `iris` for Intel)
-to force a specific hardware driver.
+The script creates an isolated Wayland socket, starts a headless Weston with the GL renderer (which is
+what keeps Mesa from falling back to the software `llvmpipe` driver), runs LazerRender against it (all
+arguments pass through unchanged), and tears Weston down afterwards. No window appears on the desktop.
+Weston's CLI changed across releases, so the script probes `weston --help` and picks a spelling that
+works on both Weston 10 (`--backend=headless-backend.so --use-gl`) and 13+
+(`--backend=headless --renderer=gl`). It also **exports** `XDG_RUNTIME_DIR` — Weston hard-fails without
+it, which is the case that matters inside a container — and keeps Weston's output in a log so a
+start-up failure is diagnosable. Set `LAZERRENDER_MESA_DRIVER` (e.g. `radeonsi` for AMD, `iris` for
+Intel, `zink` to route OpenGL over Vulkan) to force a specific Mesa driver.
+
+The same script runs the engine in one of two modes: `dotnet run --project ...` from a development
+checkout, or a **published** engine when `LAZERRENDER_ENGINE` points at a `LazerRender.dll` (that is how
+the container image runs it, so the image needs no SDK and no source tree).
 
 `--duration` is optional: when omitted, the recorder renders until the replay's final input frame
 (plus a 5-second results tail). Pass `--duration <sec>` to record a fixed-length clip instead.
@@ -292,8 +303,9 @@ written to `LazerRender.Service/src/LazerRender.Api/data/` (gitignored).
 
 Secrets (OAuth client id/secret) are supplied via environment variables, never committed. See
 [`LazerRender.Service/DEPLOYMENT.md`](LazerRender.Service/DEPLOYMENT.md) for the systemd +
-self-contained publish recipe, and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the
-in-depth walkthrough of every file (engine + service).
+self-contained publish recipe and the container stack (`docker compose up -d --build`, host port
+5180, GPU passthrough and volumes), and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the in-depth
+walkthrough of every file (engine + service).
 
 ## Project phases
 
@@ -309,7 +321,7 @@ The authoritative plan is [`ROADMAP.md`](ROADMAP.md). Status at a glance:
 | 5 | The web API daemon | ✅ completed |
 | 6 | Render & web UX refinements | ✅ completed |
 | 7 | Security audit & hardening | ✅ audit complete; P0-P2 hardening done |
-| 8 | Docker, observability & release | ⬜ planned |
+| 8 | Docker, observability & release | 🚧 8.1 (Docker) done — 8.2–8.5 planned |
 | 9 | New features (replay viewer, strain graph) | ⬜ planned |
 
 The `Phase N status` sections below are a chronological record of engine work — a few later-phase
@@ -547,4 +559,38 @@ by **Web service (Phase 5)** above, and Phase 6 by **Phase 6 status** at the end
 - **CLI/config cleanup.** The granular `--hide-*` flags and the separate `--hud-only` whitelist were
   merged into one `--hud <keys...>` flag (JSON `hud`), with `--help`, the docs and the SPA updated to
   match.
+
+## Phase 8 status — Docker deployment (8.1)
+
+### Working
+
+- **One image, both halves.** [`Dockerfile`](Dockerfile) publishes the engine (`-c Release -r linux-x64`)
+  and the service, and ships them together: the service at the content root `/app`, the engine at
+  `/app/LazerRender.Game/publish/`. `LAZERRENDER_ENGINE` puts
+  [`run-headless.sh`](LazerRender.Game/scripts/run-headless.sh) into its prebuilt mode, so the running
+  container needs neither the SDK nor the source tree (and therefore not the pinned submodule).
+- **Verified end to end on a GPU host.** A 38 s test replay rendered inside the container at
+  **~270 fps** (identical to the same replay on the bare-metal host) to a valid 1280×720@60 h264 + AAC
+  44.1 kHz MP4. `/health` answers 200, the CSP and security headers are present, and `/app/keys` is
+  `0700` with `0600` key files — so the audit's “never bake the key ring into a layer” rule holds.
+- **Compose stack** ([`docker-compose.yml`](docker-compose.yml)) for Docker/Portainer: host port
+  **5180**, render-node-only GPU passthrough, `shm_size: 1gb`, `init: true`, named volumes for
+  `/app/data` and `/app/keys`, and `.env`-driven settings (OAuth client, `AllowedHosts`,
+  `Proxy__KnownProxies`/`KnownNetworks`, admin ids).
+
+### Fixed on the way
+
+- **Image Mesa/Weston were too old for modern GPUs.** Debian bookworm ships Mesa 22.3 (cannot drive an
+  AMD RDNA4/gfx1200 part at all) and Weston 10, under which the capture pipeline wedged on the first
+  frame. The Dockerfile now takes Mesa 25.x and Weston 14.x from `bookworm-backports`.
+- **`run-headless.sh` had two real bugs**, both latent on a desktop host and fatal in a container: it
+  never *exported* `XDG_RUNTIME_DIR` (Weston hard-fails without it), and it hard-coded the newer Weston
+  spelling `--backend=headless --renderer=gl`. It now probes `weston --help` and exports the runtime
+  dir, and logs Weston's output instead of discarding it.
+- **FFmpeg 5.1 startup deadlock.** Debian 12's FFmpeg analyses every input before transcoding; the
+  audio FIFO is empty at that point (the recorder has not captured frame one yet), so FFmpeg blocked,
+  never drained the video pipe, and the render wedged on `frame:0`. FFmpeg 9.x does not do this, which
+  is why it only appeared in the container. The engine now passes `-analyzeduration 0 -probesize 32`
+  before each input — they are fully described on the command line, so the analysis is pointless
+  anyway. See [`ARCHITECTURE.md`](ARCHITECTURE.md) §2.8.
 
