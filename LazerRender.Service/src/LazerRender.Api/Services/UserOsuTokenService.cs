@@ -55,6 +55,17 @@ public sealed class UserOsuTokenService
         if (tryGetCached(userId, out var cached))
             return cached;
 
+        // A refresh cannot succeed without client credentials (osu! answers 400 invalid_request), so do
+        // not make the call: the caller falls back to the bot credential, then to offline rendering.
+        if (!osu.IsConfigured)
+        {
+            logger.LogDebug(
+                "osu! OAuth is not configured; cannot refresh the stored credential for user {UserId}.",
+                userId);
+
+            return null;
+        }
+
         SemaphoreSlim gate = gates.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(ct);
 

@@ -42,6 +42,13 @@ public sealed class OsuOAuthService
     }
 
     /// <summary>
+    /// Whether a client id/secret pair is configured. Without one the token endpoint can neither issue
+    /// nor refresh a token, so callers should skip the round-trip rather than absorb a 400.
+    /// </summary>
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(options.ClientId) && !string.IsNullOrWhiteSpace(options.ClientSecret);
+
+    /// <summary>
     /// Builds the authorize URL the browser is redirected to.
     ///
     /// The scope list is built by hand and appended verbatim rather than going through

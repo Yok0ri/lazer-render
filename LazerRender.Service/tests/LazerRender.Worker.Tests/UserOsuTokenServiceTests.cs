@@ -99,6 +99,15 @@ public sealed class UserOsuTokenServiceTests
         Assert.Null(await harness.Service.GetTokenAsync(user_id, CancellationToken.None));
     }
 
+    [Fact]
+    public async Task Skips_the_refresh_when_oauth_is_not_configured()
+    {
+        await using var harness = await Harness.CreateAsync("rt-1", oauthConfigured: false);
+
+        Assert.Null(await harness.Service.GetTokenAsync(user_id, CancellationToken.None));
+        Assert.Equal(0, harness.Handler.Requests);
+    }
+
     private sealed class Harness : IAsyncDisposable
     {
         private readonly SqliteConnection connection;
@@ -125,7 +134,8 @@ public sealed class UserOsuTokenServiceTests
         public string Unprotect(string value) =>
             protection.CreateProtector("OsuOAuth.RefreshToken").Unprotect(value);
 
-        public static async Task<Harness> CreateAsync(string? storedRefreshToken, bool fail = false)
+        public static async Task<Harness> CreateAsync(
+            string? storedRefreshToken, bool fail = false, bool oauthConfigured = true)
         {
             var connection = new SqliteConnection("DataSource=:memory:");
             await connection.OpenAsync();
@@ -156,7 +166,11 @@ public sealed class UserOsuTokenServiceTests
 
             var handler = new StubHandler(fail);
             var osu = new OsuOAuthService(
-                Microsoft.Extensions.Options.Options.Create(new Api.Configuration.OsuOAuthOptions()),
+                Microsoft.Extensions.Options.Options.Create(new Api.Configuration.OsuOAuthOptions
+                {
+                    ClientId = oauthConfigured ? "client-id" : "",
+                    ClientSecret = oauthConfigured ? "client-secret" : "",
+                }),
                 new HttpClient(handler));
 
             var service = new UserOsuTokenService(
