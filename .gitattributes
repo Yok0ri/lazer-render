@@ -1,0 +1,9 @@
+# Normalise line endings in the repository; check out native per platform.
+* text=auto
+
+# Shell scripts must stay LF (they run on Linux and inside the container).
+*.sh text eol=lf
+
+# The pinned osu! submodule is vendored upstream code: keep it out of language
+# stats and collapse it in diffs.
+LazerRender.Game/extern/osu linguist-vendored linguist-generated -diff

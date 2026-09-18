@@ -142,7 +142,7 @@ public sealed class UserOsuTokenServiceTests
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 await db.Database.EnsureCreatedAsync();
 
-                db.Users.Add(new UserEntity { Id = user_id, OsuUserId = 11566111, Username = "player" });
+                db.Users.Add(new UserEntity { Id = user_id, OsuUserId = 424242, Username = "player" });
                 db.OAuthTokens.Add(new OAuthTokenEntity
                 {
                     UserId = user_id,

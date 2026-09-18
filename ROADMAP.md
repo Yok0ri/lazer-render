@@ -355,3 +355,157 @@ Scope only — each feature is to be planned (architect mode) and reviewed befor
       difficulty calculation), a renderable/skinnable component, and a home in the render options —
       added as its **own entry separate from the "HUD elements" group**, since it is a data
       visualisation rather than a standard HUD component.
+
+---
+
+## Appendix — Phase history (long-form)
+
+This is the chronological engineering record that used to live in `README.md`. The checklists above
+are the authoritative plan; this appendix keeps the "what was actually built and why" detail (a few
+later-phase refinements are filed under whichever heading they were originally added beneath).
+
+### Phase 1 — Video & audio pipeline
+
+- FBO capture replaces `TakeScreenshotAsync()` (no SwapBuffers race, no black frames).
+- Raw RGBA pixels piped straight into an external FFmpeg `System.Diagnostics.Process`.
+- FFmpeg encodes `libx264`, `crf 18`, `preset fast`, `yuv420p`, 1280×720 @ 60fps.
+- End-to-end run produced a valid 3.000 s `output.mp4` (h264, 1280×720, 60fps).
+
+### Phase 2 — Headless asset management
+
+- Persistent Realm storage: `--storage` is no longer wiped between runs.
+- `--import-map <path.osz>`, `--import-skin <path.osk>`, `.osr` MD5-hash → `BeatmapInfo` lookup, and
+  `--skin "Skin Name"` selection with default/beatmap-skin fallback: all working.
+
+### Phase 3 — Rendering polish
+
+- **Native 1080p output on Wayland.** The `OsuScreenStack` is wrapped in a
+  `DrawSizePreservingFillContainer` with `TargetDrawSize` set to the requested output size, and
+  `CaptureContainer` forces the FBO to that exact size via `FrameBufferScale`. A 1366×768 physical
+  window produces a genuine 1920×1080 render without breaking lazer's UI anchors.
+- **Dynamic FFmpeg resolution sizing.** `FfmpegFrameSink` starts FFmpeg lazily from the actual
+  captured frame dimensions, eliminating rawvideo stride corruption.
+- **Fractional-sample audio accumulator.** `ReplayRecorderPlayer` keeps 44100 Hz aligned at
+  60/75/90/120 fps, removing the 120 fps electrical buzz.
+- **Safe frame extraction (superseded — see Phase 4).** The FBO was assumed RGBA32F and read as
+  `GL_FLOAT`; Phase 4 verified at runtime that the legacy `GLRenderer` allocates it as `GL_RGBA8`
+  (8/8/8/8), so the capture path now reads `GL_UNSIGNED_BYTE` directly.
+- **Headless-friendly window.** The desktop window is hidden/minimised; rendering runs natively on
+  Wayland rather than under Xvfb (X11/Xvfb triggered an uncatchable GPU driver segfault on the dev AMD
+  machine).
+- **Native results-screen transition.** `ReplayRecorderPlayer` detects the final replay input frame and
+  hands off to lazer's `CreateResults` factory, then records the score panel + statistics transition
+  for a 5 s tail; video and music fade to black over the last 1.5 s (3.5 s → 5.0 s) and results-screen
+  sounds are suppressed.
+- **Extended statistics panel.** `ExtendedResultsScreen` expands the main score panel in `OnEntering`,
+  so the recorded results screen shows the main card plus the full Performance Breakdown / Timing
+  Distribution / Accuracy Heatmap immediately. Expand slide and "new score" flair are skipped, and the
+  bottom toolbar is hidden before first draw.
+- **Settings surface.** `applyVisualToggles` iterates the data-driven `SettingsCatalog` and applies
+  every value explicitly each run — global `OsuSetting` via `LocalConfig`, ruleset values via
+  `IRulesetConfigCache` — so persisted state cannot leak between renders. The replay `ReplayOverlay`
+  banner + settings cog are always hidden.
+- **Auto duration.** With no `--duration`, the recorder stops at the replay's final input frame plus
+  the results tail; a fixed `--duration` acts as a clip-length cap with a grace window.
+- **Avatar lookup.** `applyAvatarAsync` gives the score's `APIUser` the replay player's real osu! id
+  (from the replay's `RealmUser.OnlineID`), optionally enriches it via `GET /api/v2/users/{id}` using
+  `--avatar-api-key`/`OSU_API_KEY`, then pre-warms the texture through `OnlineAssetCachingStore`.
+  Without a key the public `https://a.ppy.sh/{id}` URL is used. The pre-warm is also what prevents the
+  1080p segfault a late remote texture upload caused.
+- **Online scoreboards.** Each render is signed in with the identity of the player who queued it,
+  reusing the refresh token the service holds. The engine forces lazer onto **production** endpoints
+  (debug builds otherwise default to `dev.ppy.sh`, where a production token is rejected). A *user*
+  credential is required (`/me` rejects client-credentials tokens); without one the render still
+  succeeds with a local-only scoreboard.
+
+### Phase 4 — Hardware acceleration & optimization
+
+- **Hardware encoder selection.** `--encoder` chooses `cpu`/`amd`/`nvidia`/`intel`.
+  `FfmpegFrameSink` builds the matching args: `buildHardwareInitArgs` injects the VAAPI/QSV device
+  before inputs, `buildVideoFilterArgs` merges the `tmix` motion-blur filter with the backend's
+  format/upload filters into one `-vf` chain, and `buildEncoderArgs` selects `h264_vaapi -qp 18`,
+  `h264_nvenc -preset p4 -cq 18`, `h264_qsv -global_quality 18` or the `libx264` fallback.
+- **AMD RDNA4 verified.** A 2560×1440 @ 60fps 32 s render with `--encoder amd` completed without OOM
+  (~36 MB output); the raw RGBA pipe is encoded by the GPU media engine.
+- **The capture FBO is 8-bit RGBA, not float.** `logFboDiagnostics` shows the colour attachment is
+  `GL_UNSIGNED_NORMALIZED` 8/8/8/8 (`GL_RGBA8`) despite the `R8G8B8A8Float` name.
+- **Direct 8-bit readback.** `onFrameBufferRendered` reads with `glReadPixels(GL_UNSIGNED_BYTE)` into a
+  5-buffer `GL_PIXEL_PACK_BUFFER` ring with a zero-copy handoff to a copy thread; this roughly doubled
+  throughput (1080p60: ~29 fps → 60–118 fps).
+- **The 60 fps cap was compositor pacing, not the scene.** A flat-fill control (`LAZERRENDER_FLATFILL=1`)
+  ran at 5.99× while the real scene was locked at 60 fps; forcing `vblank_mode=0` (and NVIDIA's
+  `__GL_SYNC_TO_VBLANK=0`) in `LazerRenderGameHost` raised the 1080p baseline to 2.9–6.0×.
+- **1440p soak.** The ~4-minute 1440p60 replay that previously took >20 min now renders in ~3:19–3:49
+  with `--encoder amd` (two clean runs, no OOM/SIGSEGV); the scene render is the remaining wall.
+- **90 fps pipeline deadlock fixed** (eager FFmpeg start in `FfmpegFrameSink.Start`) and **90 fps +
+  motion-blur deadlock fixed** (`-shortest` removed; `CaptureContainer.CaptureAsync` throttles on a
+  semaphore).
+- **Supported render matrix (4K120 ceiling).** 1280×720 / 1920×1080 / 2560×1440 / 3840×2160 at
+  30/60/90/120 fps; anything else is rejected up front. 240 fps was removed (unstable at 720p, and the
+  ruleset simulates at ~60 Hz).
+- **Headless deployment (verified).** `HeadlessGameHost` uses a stub renderer, so renders run under a
+  throwaway Weston headless compositor via `run-headless.sh` (`--renderer=gl` keeps Mesa on a hardware
+  driver rather than llvmpipe).
+- **Missing-beatmap auto-download.** `--download-missing` fetches from osu.direct (fallback
+  catboy.best), imports into Realm and plays on; the downloaded `.osz` is deleted after import.
+- **Resolution-independent HUD scaling.** The screen stack is laid out at lazer's reference size
+  (1024×768) and scaled uniformly to the output resolution, exactly like
+  `ScalingContainer(ScalingMode.Everything)`; `--hud-scale` shrinks the virtual layout (UI scale).
+- **Tachyon results-screen layout + per-render settings.** The pin was moved to
+  `2026.821.0-tachyon` (since bumped to `2026.918.0-tachyon`), adopting the reworked extended results
+  screen; per-render settings, the HUD whitelist and `--render-config` were added.
+- **Supervisor progress + cancellation hooks.** JSON progress lines to stdout
+  (`PARSING` → `RENDERING_FRAMES` → `RESULTS_TAIL` → `FINALIZING` → `DONE`) and a process-wide
+  cancellation token cancelled on Ctrl+C / SIGINT / SIGTERM.
+- **Mod speed support (DT / HT / Daycore / Nightcore).** The gameplay clock advances at the mod's
+  `SpeedChange` rate; DT/HT "adjust pitch" is honoured via a BASS FX tempo stream, while pitch-off and
+  Daycore/Nightcore use pitch-preserving tempo.
+- **Output-size guard.** `--replay-info` reports the replay's natural duration/speed and
+  `RenderSizeEstimator` estimates the `.mp4` size before the worker starts; oversized jobs are
+  `Rejected` (default budget: one hour of 1080p60).
+- **HUD whitelist + argon pro default.** `--hud <keys>` hides every HUD component except the listed
+  ones (also removing skin-specific elements); with no skin requested the recorder defaults to the
+  built-in **argon pro** skin.
+- **HUD visibility parity + late metadata fix.** The `hiddengameplay` mode hides the HUD during a
+  rendered replay exactly like a human sees it, and the service re-resolves a job's map metadata after
+  a render when the queue-time lookup failed.
+
+### Phase 6 — Render & web UX refinements
+
+- **Web UI.** The Render tab's "View all" link is gone (Recent renders is a pure summary); job titles
+  are unified to `<player> | <map>` and metadata is resolved before a job becomes claimable. The Jobs
+  extended view gained song length, star rating, mods and accuracy, and one stacked time island
+  (viewer's time zone); only one job expands at a time. Downloads are named `lazerrender-video.mp4`.
+  The encoder readout moved to the admin "Render PC" card.
+- **HUD options.** New `aim-error` element split from `hiterror`, a `cosmetic` group, three
+  gap-separated checklist groups with a master toggle, and `Hit lighting` (`OsuSetting.HitLighting`,
+  default off).
+- **Engine & service.** Avatars render (the replay's real osu! id is propagated onto the score's
+  `APIUser`; `DrawableAvatar` gates on `OnlineID > 1`); online leaderboards work signed in as the
+  queuing player (two blockers cleared: the forced `PlayerConfiguration.ShowLeaderboard = false`, and
+  the `dev.ppy.sh` debug-endpoint default); tail fades share one smoothstep ramp;
+  `--hide-*`/`--hud-only` merged into `--hud <keys...>`.
+
+### Phase 8 — Docker, observability & the .NET 10 rebase (detail)
+
+- **One image, both halves.** The `Dockerfile` publishes the engine (`-c Release -r linux-x64`) and the
+  service into one image: service at `/app`, engine at `/app/LazerRender.Game/publish/`;
+  `LAZERRENDER_ENGINE` puts `run-headless.sh` into prebuilt mode, so the running container needs no SDK
+  and no source tree.
+- **Verified end to end on a GPU host.** A 38 s replay rendered inside the container at ~270 fps to a
+  valid MP4; `/health` answers 200 with the CSP/security headers, and `/app/keys` is `0700` with `0600`
+  key files.
+- **Compose stack** for Docker/Portainer: host port 5180, render-node-only GPU passthrough,
+  `shm_size: 1gb`, `init: true`, named volumes for `/app/data` and `/app/keys`, `.env`-driven settings.
+- **Container pitfalls fixed:** old Mesa/Weston on the original Debian base (now moot — the .NET 10
+  images are Ubuntu 24.04), `run-headless.sh` not exporting `XDG_RUNTIME_DIR` and hard-coding a Weston
+  spelling, and the Debian FFmpeg 5.1 startup deadlock (fixed with `-analyzeduration 0 -probesize 32`).
+- **Logging/instrumentation core (8.2).** One `LogRecord` model, two bounded in-memory ring buffers,
+  a single redaction point, the engine stdout/stderr forwarder, and the `LAZERRENDER_DEBUG` debug/release
+  gate.
+- **Admin observability panel (8.3).** Users/Library/Render PC/Console logs; the log streams are polled
+  with a server-side lease (no SignalR client is shipped) and cleared when the panel closes.
+- **Maintenance runbook (8.4).** See `MAINTENANCE.md`; validated by a tachyon dry run.
+- **.NET 10 tachyon rebase.** The pin moved to `2026.918.0-tachyon`; the whole repository moved from
+  .NET 8 to .NET 10 (engine, contracts, API, tests; EF Core 10.0.12). No tachyon API breakage was hit.
+  Full detail in `MAINTENANCE.md` §4.2.

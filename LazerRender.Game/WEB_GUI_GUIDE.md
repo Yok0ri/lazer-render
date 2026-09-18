@@ -1,8 +1,7 @@
 # WEB_GUI_GUIDE.md — LazerRender integration contract for the web GUI
 
-This document is the complete, minimal contract for building the future web GUI / daemon on top of
-LazerRender. It describes only what you need to drive the recorder, not its internals (see
-[`ARCHITECTURE.md`](../ARCHITECTURE.md) for internals).
+This document is the complete, minimal contract for building a web GUI / daemon on top of LazerRender.
+It describes only what you need to drive the recorder, not its internals.
 
 ---
 
@@ -314,7 +313,7 @@ scripts/fetch-user-token.sh
 
 As a fallback for jobs whose owner has no usable stored credential, the daemon also accepts
 `Renderer:OsuBotRefreshToken` (a refresh token, refreshed on demand) or `Renderer:OsuBotToken`
-(a ready-made access token). See [`DEPLOYMENT.md`](../LazerRender.Service/DEPLOYMENT.md) §2.
+(a ready-made access token).
 
 The beatmap also needs a populated online id; the service sets the in-memory ranked status when a
 map was imported from a bare `.osu`/`.osz` (which carries no online status).

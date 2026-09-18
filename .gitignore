@@ -57,3 +57,12 @@ jobs/
 results/
 publish/
 storage/
+
+# Private replay fixtures used for local testing — never shipped.
+LazerRender.Game/tests/
+*.osr
+
+# Scratch output directories from local render tests.
+out*/
+frames/
+test_output/
