@@ -2,8 +2,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using LazerRender.Api.Configuration;
+using LazerRender.Api.Services.Logging;
 using LazerRender.Contracts;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -39,36 +39,6 @@ public sealed record RenderRunResult(bool Success, int ExitCode, bool Cancelled)
 /// </summary>
 public sealed class RendererProcessRunner
 {
-    /// <summary>
-    /// Engine log lines worth surfacing by default. Everything else is Debug.
-    /// </summary>
-    private static readonly string[] notableEngineMarkers =
-    {
-        "Leaderboard:", "osu! API login:", "Avatar:", "Replay complete;", "Recorded ",
-        "treating it as ranked", "HUD visibility", "HudVisibilityFilter", "failure",
-    };
-
-    /// <summary>Engine lines that indicate something went wrong, surfaced as warnings.</summary>
-    private static readonly string[] problemEngineMarkers =
-    {
-        "error", "exception", "failed", "failure", "unhandled", "fatal", "crash", "denied",
-    };
-
-    /// <summary>Catches a credential in a shape we were not handed explicitly.</summary>
-    private static readonly Regex BearerPattern = new(
-        @"\bBearer\s+[^\s""']+",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    /// <summary>Upper bound on a single forwarded engine log line.</summary>
-    private const int MaxLoggedLineLength = 2000;
-
-    /// <summary>
-    /// Upper bound on how much engine output one render may push into the service log. Engine output is
-    /// derived from user-supplied inputs (replay usernames, beatmap metadata, uploaded archives), so a
-    /// broken or adversarial upload could otherwise emit unbounded text into the log.
-    /// </summary>
-    private const long MaxLoggedBytesPerRun = 256 * 1024;
-
     private const int SigTerm = 15;
     private const int SigKill = 9;
 
@@ -77,15 +47,27 @@ public sealed class RendererProcessRunner
     private readonly RendererOptions options;
     private readonly IHostEnvironment environment;
     private readonly ILogger<RendererProcessRunner> logger;
+    private readonly EngineLogForwarder forwarder;
 
+    /// <param name="redactor">
+    /// The shared redactor. Optional so the class can be constructed in a unit test with no pipeline;
+    /// when omitted the default empty redactor still masks bearer-token shapes.
+    /// </param>
+    /// <param name="engineLogBuffer">
+    /// The engine ring buffer that the admin console reads. Optional for the same reason; when omitted
+    /// lines are still forwarded to <paramref name="logger"/>, preserving the pre-8.2 behaviour.
+    /// </param>
     public RendererProcessRunner(
         IOptions<RendererOptions> options,
         IHostEnvironment environment,
-        ILogger<RendererProcessRunner> logger)
+        ILogger<RendererProcessRunner> logger,
+        LogRedactor? redactor = null,
+        EngineLogRingBuffer? engineLogBuffer = null)
     {
         this.options = options.Value;
         this.environment = environment;
         this.logger = logger;
+        forwarder = new EngineLogForwarder(logger, redactor ?? LogRedactor.Empty, engineLogBuffer);
     }
 
     public async Task<RenderRunResult> RunAsync(
@@ -111,7 +93,7 @@ public sealed class RendererProcessRunner
         process.Start();
 
         var doneSeen = false;
-        var logBudget = new LogBudget(MaxLoggedBytesPerRun);
+        var logBudget = new LogBudget(EngineLogForwarder.MaxLoggedBytesPerRun);
 
         var progressTask = Task.Run(async () =>
         {
@@ -119,7 +101,7 @@ public sealed class RendererProcessRunner
             {
                 if (!TryParseProgress(line, out var progress))
                 {
-                    logEngineLine("stdout", line, invocation.RedactedValues, logBudget);
+                    forwarder.Forward("stdout", line, invocation.RedactedValues, logBudget);
                     continue;
                 }
 
@@ -136,7 +118,7 @@ public sealed class RendererProcessRunner
         var stderrTask = Task.Run(async () =>
         {
             while (await process.StandardError.ReadLineAsync() is { } line)
-                logEngineLine("stderr", line, invocation.RedactedValues, logBudget);
+                forwarder.Forward("stderr", line, invocation.RedactedValues, logBudget);
         }, CancellationToken.None);
 
         bool cancelled = false;
@@ -178,68 +160,12 @@ public sealed class RendererProcessRunner
     }
 
     /// <summary>
-    /// Forwards one line of the engine's own log to the service log. Notable lines are visible at the
-    /// default level; the engine's framework chatter is kept at Debug so it does not drown the log.
-    /// Credential values are redacted first, the line is length-capped, and the whole render shares a
-    /// byte budget so a misbehaving engine cannot fill the log.
-    /// </summary>
-    private void logEngineLine(string source, string line, IReadOnlyList<string> secrets, LogBudget budget)
-    {
-        if (string.IsNullOrWhiteSpace(line))
-            return;
-
-        line = Redact(line, secrets);
-
-        if (line.Length > MaxLoggedLineLength)
-            line = string.Concat(line.AsSpan(0, MaxLoggedLineLength), "…[truncated]");
-
-        if (!budget.TryReserve(line.Length))
-        {
-            if (budget.NotifyExhaustedOnce())
-            {
-                logger.LogWarning(
-                    "[engine/{Source}] further engine output suppressed for this render (budget {Budget} bytes reached).",
-                    source, MaxLoggedBytesPerRun);
-            }
-
-            return;
-        }
-
-        if (problemEngineMarkers.Any(m => line.Contains(m, StringComparison.OrdinalIgnoreCase)))
-            logger.LogWarning("[engine/{Source}] {Line}", source, line);
-        else if (notableEngineMarkers.Any(m => line.Contains(m, StringComparison.OrdinalIgnoreCase)))
-            logger.LogInformation("[engine/{Source}] {Line}", source, line);
-        else
-            logger.LogDebug("[engine/{Source}] {Line}", source, line);
-    }
-
-    /// <summary>
     /// Replaces every known credential value with a marker, and masks anything that looks like a bearer
-    /// token, so a credential can never reach the log.
+    /// token, so a credential can never reach the log. Kept as a static bridge to the shared
+    /// <see cref="LogRedactor"/> so existing callers and tests are unaffected.
     /// </summary>
-    internal static string Redact(string line, IReadOnlyList<string> secrets)
-    {
-        foreach (string secret in secrets)
-        {
-            if (!string.IsNullOrEmpty(secret))
-                line = line.Replace(secret, "[redacted]", StringComparison.Ordinal);
-        }
-
-        return BearerPattern.Replace(line, "Bearer [redacted]");
-    }
-
-    /// <summary>Per-render byte budget for forwarded engine output.</summary>
-    private sealed class LogBudget(long limit)
-    {
-        private long remaining = limit;
-        private int notified;
-
-        /// <summary>Reserves room for a line; false once the budget is exhausted.</summary>
-        public bool TryReserve(int bytes) => Interlocked.Add(ref remaining, -bytes) > 0;
-
-        /// <summary>True exactly once, so the "output suppressed" notice is logged a single time.</summary>
-        public bool NotifyExhaustedOnce() => Interlocked.Exchange(ref notified, 1) == 0;
-    }
+    internal static string Redact(string line, IReadOnlyList<string> secrets) =>
+        LogRedactor.RedactStatic(line, secrets);
 
     private string ResolveRunnerScript()
     {

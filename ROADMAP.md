@@ -209,12 +209,12 @@ Phase 7 is done: the audit's remaining items are the deliberate acceptances reco
 Each item is closed with its verification evidence: a test, a reproduction, or a written justification
 for accepting the risk.
 
-## 🚧 Phase 8 — Docker, Observability & Release (8.1 complete)
+## 🚧 Phase 8 — Docker, Observability & Release (8.1 and 8.2 complete)
 
-Sub-phase 8.1 is implemented and verified. The logging/instrumentation design, the debugging workflow
-and the observability panel (8.2–8.4) are still to be designed by a more capable model; this phase
-records their scope and constraints. `MAINTENANCE_INFRA_CONTEXT.md` is the hand-off briefing for that
-design work.
+Sub-phases 8.1 (Docker) and 8.2 (logging & instrumentation core) are implemented and verified. The
+admin observability panel (8.3) and the maintenance/debug docs (8.4) remain. `MAINTENANCE_INFRA_CONTEXT.md`
+is the hand-off briefing for that design work; `PHASE_8_LOGGING_CONTEXT.md` records what 8.2 built and
+the interfaces 8.3/8.4 consume.
 
 ### 8.1 Docker deployment ✅
 
@@ -261,23 +261,26 @@ length and size. `/health` returns 200 with the CSP and security headers, `/app/
   `-analyzeduration 0 -probesize 32` before each input. **This is a real behavioural dependency on the
   FFmpeg build**, which is why 8.3's Render PC card should report the FFmpeg version.
 
-### 8.2 Logging & instrumentation core
+### 8.2 Logging & instrumentation core ✅
 
-- [ ] Lock the shared design **once**, before either consumer is built: a single log record model
-      (level, source, timestamp, message); a bounded in-memory ring buffer for the service stream; an
-      `ILoggerProvider` feeding it; `RendererProcessRunner.logEngineLine` feeding it with
-      `source = engine`; and pluggable sinks.
-- [ ] Make Phase 8.3's admin panel and the local debug workflow two consumers of that one pipeline —
-      neither may reimplement it.
-- [ ] Reuse the classification already implemented in `RendererProcessRunner` (Warning for problems,
+- [x] Lock the shared design **once**, before either consumer is built: a single log record model
+      (`LogRecord(Sequence, Timestamp, Source, Severity, Message)` in `LazerRender.Contracts`); a
+      bounded in-memory ring buffer for the service stream; an `ILoggerProvider` feeding it; the
+      extracted `EngineLogForwarder` feeding the engine stream with `Source = Engine`; and pluggable
+      `ILogSink`s (`Services/Logging/`).
+- [x] Make Phase 8.3's admin panel and the local debug workflow two consumers of that one pipeline —
+      neither may reimplement it. (8.3 is now a consumer of `ServiceLogRingBuffer` /
+      `EngineLogRingBuffer` only.)
+- [x] Reuse the classification already implemented in `RendererProcessRunner` (Warning for problems,
       Information for notable lines, Debug for framework chatter) and expose level, source and timestamp.
-- [ ] Honour the security audit's redaction findings: engine stdout/stderr can carry credentials (the
-      osu! user token arrives via argv, and avatar-lookup failures log response bodies), so redaction
-      must happen in the pipeline, before anything reaches a browser.
-- [ ] Establish the debug/release distinction: debug-only instrumentation gated by a compile-time flag
-      and compiled out of release builds, plus a runtime toggle for paths that must not need a rebuild.
-      Note that `run-headless.sh` currently runs the engine via `dotnet run` (Debug), so "release" has to
-      be arranged deliberately rather than assumed.
+- [x] Honour the security audit's redaction findings: a single `LogRedactor` (known configuration
+      secrets + per-render credentials + bearer shapes) runs before any record reaches a buffer, so a
+      credential cannot reach a browser.
+- [x] Establish the debug/release distinction: root `Directory.Build.props` defines `LAZERRENDER_DEBUG`
+      for Debug builds (plus `-p:LazerRenderDebug=true`), `[Conditional]` instrumentation in the engine
+      is compiled out of Release, and `LAZERRENDER_DEBUG=1` / `LAZERRENDER_CONFIGURATION` cover the
+      runtime and source-build paths. `run-headless.sh` still defaults to Debug and now supports an
+      opt-in Release build.
 
 ### 8.3 Admin observability panel
 

@@ -23,6 +23,15 @@ tracked tree.
 
 So there is **no** existing maintenance workflow to preserve; this is greenfield.
 
+**Status addendum (Phase 8.2 implemented).** The logging/instrumentation core this document describes as
+greenfield now exists: `LazerRender.Service/src/LazerRender.Api/Services/Logging/` (the `ILogSink`
+contract, the two bounded ring buffers, `LogRedactor`, `RingBufferLoggerProvider`, `EngineLogForwarder`,
+`DebugMode`), the shared `LogRecord` model in `LazerRender.Contracts`, the repository-root
+`Directory.Build.props` (`LAZERRENDER_DEBUG`) and `LazerRender.Game/DebugInstrumentation.cs`. See
+[`PHASE_8_LOGGING_CONTEXT.md`](PHASE_8_LOGGING_CONTEXT.md:1) for the interfaces the remaining 8.3/8.4
+work consumes. The fragility inventory in §5 and the dependency notes in §8 below are still the
+maintenance baseline.
+
 ---
 
 ## 1. Architecture overview
@@ -614,6 +623,12 @@ Engine **stdout** at the same time carries the machine-readable contract (not lo
 | Admin encoder readout | `AdminController`/`MetaController` + `wwwroot/app.js` (`#encoder-info`) | The only monitoring-ish UI today. |
 
 ### 6.5 Things a maintenance workflow will need that do **not** exist yet
+
+> **Phase 8.2 update.** The first three items are now addressed *in memory* (see
+> [`PHASE_8_LOGGING_CONTEXT.md`](PHASE_8_LOGGING_CONTEXT.md:1)): there is still no disk log, but the
+> service and engine logs are retained in bounded ring buffers ready for the 8.3 panel, and a
+> debug/release distinction now exists (`Directory.Build.props`, `DebugMode`,
+> `DebugInstrumentation`). The functional smoke-test harness below remains unbuilt.
 
 - No log file for the service (console only).
 - No way to see engine stdout/stderr from the web UI.

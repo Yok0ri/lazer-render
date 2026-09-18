@@ -710,6 +710,16 @@ consumed faster than real time. This class uses **reflection** to:
 A tiny static holder for the process-wide `CancellationToken`. The recorder loop polls it so an
 external supervisor (or Ctrl+C / SIGTERM) can abort a job.
 
+#### 2.5.14 [`DebugInstrumentation.cs`](LazerRender.Game/DebugInstrumentation.cs:1) — debug/release gate
+
+The engine half of the Phase 8.2 debug/release distinction. `Log(string)` is marked
+`[Conditional("LAZERRENDER_DEBUG")]`, so its call sites and message formatting are removed from
+Release builds; the symbol is defined for Debug builds by the repository-root
+[`Directory.Build.props`](Directory.Build.props:1) (and can be forced in Release with
+`-p:LazerRenderDebug=true`). `LogRuntime(string)` covers diagnostics that must stay switchable without
+a rebuild — it is inert unless `LAZERRENDER_DEBUG=1` is set. See Phase 8.2 in
+[`PHASE_8_LOGGING_CONTEXT.md`](PHASE_8_LOGGING_CONTEXT.md:1).
+
 ### 2.6 The two osu! config managers
 
 LazerRender reuses osu!lazer's own persistent config instead of inventing its own:
@@ -1104,6 +1114,14 @@ and map metadata), `JobCreatedResponse`, `JobListResponse`, `ApiUserDto`, `Prese
 `PresetListResponse`, `AdminUserDto`, and `ErrorResponse` (the standard `{ "error", "detail" }`
 error body).
 
+##### [`LogRecord.cs`](LazerRender.Service/src/LazerRender.Contracts/LogRecord.cs:1)
+
+The single log record model of the Phase 8.2 pipeline, shared with the (Phase 8.3) admin console:
+`LogRecord(Sequence, Timestamp, Source, Severity, Message)` plus the `LogSource` (`Service` /
+`Engine`) and `LogSeverity` (`Debug`/`Information`/`Warning`/`Error`) enums. It is our own severity
+enum rather than `Microsoft.Extensions.Logging.LogLevel` because this project has no package
+references. `Sequence` is per-buffer and monotonic, so a consumer polls with the last sequence it saw.
+
 #### 3.6.2 `LazerRender.Api` — the web application
 
 ##### [`Program.cs`](LazerRender.Service/src/LazerRender.Api/Program.cs:15) — composition root
@@ -1215,6 +1233,7 @@ via `AddOptions<...>().Bind(...)` in `Program.cs`.
 | [`QuotaOptions`](LazerRender.Service/src/LazerRender.Api/Configuration/QuotaOptions.cs:6) | `Quota` | Per-user abuse protection: `MaxActiveJobs` (1), `MaxJobsPerDay` (10), `MaxUploadBytes`, `MaxDurationSeconds`, `DefaultMaxAttempts` (3), `ResultRetentionDays` (7). |
 | [`AdminOptions`](LazerRender.Service/src/LazerRender.Api/Configuration/AdminOptions.cs:8) | `Admin` | `OsuUserIds` (comma-separated ids granted `admin`; ships empty) and `BootstrapToken` (one-shot secret that lets a fresh instance claim its initial admin account). |
 | [`OsuOAuthOptions`](LazerRender.Service/src/LazerRender.Api/Configuration/OsuOAuthOptions.cs:8) | `Osu:OAuth` | osu! OAuth v2 client id/secret, endpoints, redirect URI, scopes (default `identify public` — `public` is what the beatmap-leaderboard fetch needs), user-agent. |
+| [`ObservabilityOptions`](LazerRender.Service/src/LazerRender.Api/Configuration/ObservabilityOptions.cs:5) | `Observability` | In-memory log pipeline bounds (Phase 8.2): `ServiceBufferSize` (500), `EngineBufferSize` (1000), `ServiceMinimumLevel` / `EngineMinimumLevel` (both `Information`). A Debug build or `LAZERRENDER_DEBUG=1` lowers both to `Debug`. Provides `ParseSeverity`. |
 
 #### 3.6.5 `Services/` — business logic
 
@@ -1436,6 +1455,26 @@ A second `BackgroundService` that runs hourly and deletes result files whose `Re
 passed. It keeps the job row for history and only removes the `.mp4` and its (now empty) result
 directory, nulling `OutputPath`/`ResultSize` so the download button disappears.
 
+##### `Services/Logging/` — the Phase 8.2 log pipeline
+
+The one pipeline both the admin console (Phase 8.3) and the local debug workflow consume. Nothing is
+persisted: the buffers are in-memory and bounded, so memory use is constant regardless of how much an
+engine render logs.
+
+| File | Role |
+|---|---|
+| [`ILogSink.cs`](LazerRender.Service/src/LazerRender.Api/Services/Logging/ILogSink.cs:7) | The pluggable sink contract (`Write(source, severity, message)`). New destinations are added by registering another sink, not by changing producers. |
+| [`RingLogBuffer.cs`](LazerRender.Service/src/LazerRender.Api/Services/Logging/RingLogBuffer.cs:13) | Bounded, thread-safe ring of `LogRecord`s with monotonic per-buffer sequences, `Snapshot(afterSequence)` delta reads, `Subscribe`/`SubscriberCount` (the capture gate Phase 8.3 needs), an `EntryAppended` event and `Clear()`. Filters below `MinimumSeverity`. |
+| [`LogBuffers.cs`](LazerRender.Service/src/LazerRender.Api/Services/Logging/LogBuffers.cs:9) | `ServiceLogRingBuffer` and `EngineLogRingBuffer` — two distinct instances so the two streams never evict each other. Both resolve their effective minimum from `ObservabilityOptions`/`DebugMode`. |
+| [`LogRedactor.cs`](LazerRender.Service/src/LazerRender.Api/Services/Logging/LogRedactor.cs:20) | The single redaction point (audit M-7/H-4): replaces known secret values (from configuration plus per-render credentials) and any `Bearer <token>` shape. Every sink path goes through it, so a raw credential can never enter a buffer. |
+| [`RingBufferLoggerProvider.cs`](LazerRender.Service/src/LazerRender.Api/Services/Logging/RingBufferLoggerProvider.cs:15) | An `ILoggerProvider` that mirrors service `ILogger` output into `ServiceLogRingBuffer`, redacted and length-capped, with the category folded into the message. |
+| [`EngineLogForwarder.cs`](LazerRender.Service/src/LazerRender.Api/Services/Logging/EngineLogForwarder.cs:14) | Owns the engine line classification (problem → Warning, notable → Information, rest → Debug) extracted from `RendererProcessRunner`, redacts/caps, applies the shared per-render `LogBudget`, forwards to `ILogger` and writes to `EngineLogRingBuffer` with `Source = Engine`. |
+| [`DebugMode.cs`](LazerRender.Service/src/LazerRender.Api/Services/Logging/DebugMode.cs:11) | Runtime half of the debug/release gate: `LAZERRENDER_DEBUG=1`, or a Debug build (compile-time `LAZERRENDER_DEBUG`), lowers capture to Debug. |
+
+Registration lives in [`Program.cs`](LazerRender.Service/src/LazerRender.Api/Program.cs:212):
+`LogRedactor` (from configuration), both buffers, and `ILoggerProvider` — the last is additive with
+the default console logger.
+
 #### 3.6.6 `Controllers/` — HTTP endpoints
 
 All controllers return camelCase JSON (configured in `Program.cs`) and use the standard
@@ -1595,6 +1634,10 @@ xUnit tests using in-memory SQLite:
   verifies `JobCancellationService` token identity and cancellation.
 - [`DatabaseInitializerTests.cs`](LazerRender.Service/tests/LazerRender.Worker.Tests/DatabaseInitializerTests.cs:9) —
   verifies the initializer re-adds dropped columns to an existing schema.
+- [`LoggingPipelineTests.cs`](LazerRender.Service/tests/LazerRender.Worker.Tests/LoggingPipelineTests.cs:18) —
+  Phase 8.2: ring-buffer bounds/eviction/delta/concurrency/subscription, the service
+  `ILoggerProvider` capture and redaction, engine classification + buffering, and an end-to-end
+  assertion that the render runner feeds the engine buffer with redacted lines.
 
 #### 3.6.10 `deploy/` — production artifacts
 
@@ -1819,6 +1862,13 @@ with real EF Core migrations.)
 The single worker loop is in [`RenderWorker.ExecuteAsync`](LazerRender.Service/src/LazerRender.Api/Services/RenderWorker.cs:62).
 The design notes: multi-GPU support means one worker per GPU, each with its own `RenderLockService`
 gate, all claiming from the same `jobs` table.
+
+#### Add a log sink
+
+Implement [`ILogSink`](LazerRender.Service/src/LazerRender.Api/Services/Logging/ILogSink.cs:7) and
+register it in DI; producers are untouched. A sink must be thread-safe, must never throw, and must
+receive already-redacted text (do not add a producer that bypasses `LogRedactor`). The two stream
+buffers are separate instances so a new sink decides which stream it wants.
 
 ### 3.16 Scripts (service)
 

@@ -1,0 +1,21 @@
+<Project>
+
+  <!--
+    Phase 8.2 debug/release distinction.
+
+    MSBuild resolves Directory.Build.props by walking up from each project and stopping at the first
+    one found. This root file therefore applies to LazerRender.Game, LazerRender.Contracts,
+    LazerRender.Api and LazerRender.Worker.Tests, but NOT to the pinned osu! submodule, which has its
+    own LazerRender.Game/extern/osu/Directory.Build.props (and must never be edited).
+
+    LAZERRENDER_DEBUG gates instrumentation that is compiled out of Release builds (via [Conditional]
+    on the engine side). A Release build can still opt in with `-p:LazerRenderDebug=true`. Not every
+    diagnostic can be compiled out, so there is also the runtime toggle LAZERRENDER_DEBUG=1, honoured
+    by DebugMode / DebugInstrumentation.
+  -->
+  <PropertyGroup>
+    <DefineConstants Condition="'$(Configuration)' == 'Debug'">$(DefineConstants);LAZERRENDER_DEBUG</DefineConstants>
+    <DefineConstants Condition="'$(LazerRenderDebug)' == 'true'">$(DefineConstants);LAZERRENDER_DEBUG</DefineConstants>
+  </PropertyGroup>
+
+</Project>

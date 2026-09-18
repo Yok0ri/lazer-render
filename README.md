@@ -307,6 +307,19 @@ self-contained publish recipe and the container stack (`docker compose up -d --b
 5180, GPU passthrough and volumes), and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the in-depth
 walkthrough of every file (engine + service).
 
+### Observability & debugging (Phase 8.2)
+
+The service keeps a bounded, **in-memory** log pipeline; nothing is written to disk. Two independent
+ring buffers are filled — **service** (this API/worker, mirrored from `ILogger` by an
+`ILoggerProvider`) and **engine** (the recorder child process's stdout/stderr, classified into
+Warning/Information/Debug). Every record is redacted before it is stored, so an osu! token can never
+reach a browser. The Phase 8.3 admin console is a read-only consumer of these buffers.
+
+Buffer sizes and minimum levels live under the `Observability` section of `appsettings.json`. Set
+`LAZERRENDER_DEBUG=1` to drop both streams to Debug at runtime (a Debug build does this by default);
+the same variable turns on `set -x` in `run-headless.sh`. `LAZERRENDER_CONFIGURATION=Release` makes the
+source-build render path produce a Release engine, compiling the debug instrumentation out.
+
 ## Project phases
 
 The authoritative plan is [`ROADMAP.md`](ROADMAP.md). Status at a glance:
@@ -321,7 +334,7 @@ The authoritative plan is [`ROADMAP.md`](ROADMAP.md). Status at a glance:
 | 5 | The web API daemon | ✅ completed |
 | 6 | Render & web UX refinements | ✅ completed |
 | 7 | Security audit & hardening | ✅ audit complete; P0-P2 hardening done |
-| 8 | Docker, observability & release | 🚧 8.1 (Docker) done — 8.2–8.5 planned |
+| 8 | Docker, observability & release | 🚧 8.1 (Docker) and 8.2 (logging core) done — 8.3–8.5 planned |
 | 9 | New features (replay viewer, strain graph) | ⬜ planned |
 
 The `Phase N status` sections below are a chronological record of engine work — a few later-phase

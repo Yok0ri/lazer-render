@@ -6,6 +6,7 @@ using LazerRender.Api.Configuration;
 using LazerRender.Api.Data;
 using LazerRender.Api.Hubs;
 using LazerRender.Api.Services;
+using LazerRender.Api.Services.Logging;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.Features;
@@ -73,6 +74,7 @@ builder.Services.AddOptions<StorageOptions>().Bind(builder.Configuration.GetSect
 builder.Services.AddOptions<RendererOptions>().Bind(builder.Configuration.GetSection(RendererOptions.SectionName));
 builder.Services.AddOptions<QuotaOptions>().Bind(builder.Configuration.GetSection(QuotaOptions.SectionName));
 builder.Services.AddOptions<AdminOptions>().Bind(builder.Configuration.GetSection(AdminOptions.SectionName));
+builder.Services.AddOptions<ObservabilityOptions>().Bind(builder.Configuration.GetSection(ObservabilityOptions.SectionName));
 
 // --- Storage (SQLite) ---
 // The data directory is resolved the same way StorageService resolves it, so the database file
@@ -209,6 +211,15 @@ builder.Services.AddOptions<OsuOAuthOptions>()
 builder.Services.AddHttpClient<OsuOAuthService>();
 builder.Services.AddScoped<AuthService>();
 
+// --- Observability (Phase 8.2 logging pipeline) ---
+// One redactor and two bounded ring buffers. The redactor knows the credentials this process holds,
+// so service logs are redacted too; the provider feeds the service buffer from ILogger, and the render
+// runner feeds the engine buffer from the child process's stdout/stderr. Nothing is persisted.
+builder.Services.AddSingleton(_ => LogRedactor.FromConfiguration(builder.Configuration));
+builder.Services.AddSingleton<ServiceLogRingBuffer>();
+builder.Services.AddSingleton<EngineLogRingBuffer>();
+builder.Services.AddSingleton<ILoggerProvider, RingBufferLoggerProvider>();
+
 // --- Realtime progress + render worker ---
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<JobCancellationService>();
@@ -241,6 +252,20 @@ var app = builder.Build();
 // This is a stopgap until EF Core migrations replace EnsureCreated (see DEPLOYMENT.md).
 foreach (string warning in DatabaseInitializer.Initialize(app.Services))
     app.Logger.LogWarning("{Warning}", warning);
+
+// Make the observability pipeline's effective shape visible at startup: an operator debugging a
+// missing console stream should not have to guess whether capture is on and at which level.
+{
+    var observability = app.Services.GetRequiredService<IOptions<ObservabilityOptions>>().Value;
+    var serviceBuffer = app.Services.GetRequiredService<ServiceLogRingBuffer>();
+    var engineBuffer = app.Services.GetRequiredService<EngineLogRingBuffer>();
+
+    app.Logger.LogInformation(
+        "Log pipeline: service buffer {ServiceSize} entries at {ServiceLevel}+, engine buffer {EngineSize} entries at {EngineLevel}+; debug instrumentation {DebugState}.",
+        serviceBuffer.Capacity, serviceBuffer.MinimumSeverity,
+        engineBuffer.Capacity, engineBuffer.MinimumSeverity,
+        DebugMode.Enabled ? "enabled" : "disabled");
+}
 
 // Leaderboards silently stay offline when the requested osu! scopes are too narrow, and users who
 // signed in before `public` was added keep their old grant — so make the effective scopes visible.

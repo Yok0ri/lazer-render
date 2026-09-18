@@ -47,6 +47,11 @@ namespace LazerRender
                 return 2;
             }
 
+            // Debug-build-only line (compiled out of Release); the runtime variant works anywhere the
+            // LAZERRENDER_DEBUG=1 toggle is set. See DebugInstrumentation.
+            DebugInstrumentation.Log($@"parsed run mode {options.Mode}.");
+            DebugInstrumentation.LogRuntime($@"starting run mode {options.Mode} with runtime diagnostics.");
+
             switch (options.Mode)
             {
                 case RunMode.ImportMap:

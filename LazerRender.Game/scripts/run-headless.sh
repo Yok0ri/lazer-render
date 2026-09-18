@@ -14,6 +14,14 @@
 
 set -euo pipefail
 
+# Optional shell tracing, off by default. This is the runtime half of the Phase 8.2 debug/release
+# distinction: setting LAZERRENDER_DEBUG (to anything non-empty) turns on `set -x` so a start-up
+# failure can be diagnosed without editing the script. It is deliberately not compiled out — a shell
+# script has no build step — so it must stay opt-in.
+if [[ -n "${LAZERRENDER_DEBUG:-}" ]]; then
+    set -x
+fi
+
 # Resolve the runtime directory used by Wayland compositors. XDG_RUNTIME_DIR is standard; if it is
 # unset (e.g. launched from a bare systemd service or from a container), fall back to a secured
 # per-user tmpdir. Note that the variable must be *exported*, not merely computed: Weston itself
@@ -106,5 +114,23 @@ if [[ -n "${LAZERRENDER_ENGINE:-}" ]]; then
     WAYLAND_DISPLAY="$SOCKET" dotnet "$LAZERRENDER_ENGINE" "$@"
 else
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-    WAYLAND_DISPLAY="$SOCKET" dotnet run --project "$SCRIPT_DIR/../LazerRender.Game.csproj" -- "$@"
+
+    # Configuration selection for the source-build path. Debug stays the default so local behaviour is
+    # unchanged, but a Release build (which compiles the LAZERRENDER_DEBUG instrumentation out) is
+    # opt-in via LAZERRENDER_CONFIGURATION=Release. The container image does not use this path: it runs
+    # a prebuilt publish through LAZERRENDER_ENGINE.
+    CONFIGURATION="${LAZERRENDER_CONFIGURATION:-Debug}"
+    case "$CONFIGURATION" in
+        Debug|Release) ;;
+        *)
+            echo "LAZERRENDER_CONFIGURATION must be Debug or Release (got '$CONFIGURATION')." >&2
+            exit 1
+            ;;
+    esac
+
+    if [[ -n "${LAZERRENDER_DEBUG:-}" ]]; then
+        echo "run-headless: building engine in $CONFIGURATION configuration" >&2
+    fi
+
+    WAYLAND_DISPLAY="$SOCKET" dotnet run --configuration "$CONFIGURATION" --project "$SCRIPT_DIR/../LazerRender.Game.csproj" -- "$@"
 fi
