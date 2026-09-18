@@ -152,7 +152,7 @@ does not terminate HTTPS in production.
 
 ## 4. What the publish bundle contains
 
-- The .NET 8 runtime and the API binaries (self-contained, linux-x64).
+- The .NET 10 runtime and the API binaries (self-contained, linux-x64).
 - `appsettings.json` only (no Development overrides, no PDBs).
 - No OAuth credentials, no tokens. Refresh tokens are encrypted at rest in the SQLite database with
   a Data Protection key ring kept in `keys/`; both live outside the bundle and are gitignored.
@@ -353,12 +353,20 @@ children the render loop leaves behind. With a bare `docker run`, pass `--init` 
 Process-group cancellation of a running render works either way — the runner signals the whole group,
 not just the direct child.
 
-### Why Mesa and Weston come from bookworm-backports
+### The base image is Ubuntu 24.04 (noble)
 
-The image is built on the bookworm-based .NET 8 images, but bookworm's Mesa 22.3 and Weston 10 predate
-current GPU families: Mesa 22.3 cannot drive an AMD RDNA4 (`gfx1200`) part at all, and the engine's
-capture pipeline wedges on the first frame under Weston 10. The Dockerfile therefore installs Mesa 25.x
-and Weston 14.x from `bookworm-backports` (only those, plus their direct dependencies — no libc bump).
+The .NET 10 images are Ubuntu 24.04 "noble", not Debian bookworm (the base used when 8.1 was verified).
+That changes the container's system packages: `libasound2` is now `libasound2t64`, and noble's Weston 13
+already understands `--backend=headless --renderer=gl`, so `run-headless.sh`'s flag probe succeeds and no
+compositor backport is needed.
+
+The original image pulled Mesa 25.x and Weston 14.x from `bookworm-backports` because bookworm's Mesa
+22.3 cannot drive an AMD RDNA4 (`gfx1200`) part at all and Weston 10 wedged the capture pipeline on the
+first frame. That workaround is obsolete with the noble base, but the underlying caveat is not: Mesa now
+comes from the distro, and **if your GPU needs a newer Mesa than noble ships, rebuild on a base that
+carries it** — in practice `noble-updates` currently ships Mesa 25.x, which is exactly what the earlier
+image needed for RDNA4/`gfx1200`, so a current pull should already cover it. Re-run the render-path
+check below on the target GPU after any base change.
 
 ### Verifying the render path
 

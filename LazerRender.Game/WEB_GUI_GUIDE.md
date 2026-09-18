@@ -28,7 +28,7 @@ compositor — required when there is no desktop session):
 
 ```bash
 # direct (requires a GPU + Wayland/X11 session)
-dotnet LazerRender.Game/bin/Debug/net8.0/LazerRender.dll <args>
+dotnet LazerRender.Game/bin/Debug/net10.0/LazerRender.dll <args>
 
 # headless server
 scripts/run-headless.sh <args>

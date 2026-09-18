@@ -17,8 +17,8 @@ self-contained. The security model is [`SECURITY.md`](SECURITY.md); the file-by-
 ## 1. The two halves, and what "maintenance" means here
 
 ```
-LazerRender.Game/      the recorder (engine)   net8.0, pins extern/osu (tachyon)
-LazerRender.Service/   the web API + SPA       ASP.NET Core 8
+LazerRender.Game/      the recorder (engine)   net10.0, pins extern/osu (tachyon)
+LazerRender.Service/   the web API + SPA       ASP.NET Core 10
 ```
 
 Two independent failure classes:
@@ -161,10 +161,10 @@ git -C LazerRender.Game/extern/osu show <TAG>:global.json | grep version
 git -C LazerRender.Game/extern/osu show <TAG>:osu.Game/osu.Game.csproj | grep TargetFramework
 ```
 
-### 4.2 Worked example — the 2026-09-18 dry run (what actually broke)
+### 4.2 Worked example — the .NET 8 → .NET 10 migration (2026-09-18)
 
-A dry-run bump from the current pin to the newest tag was performed with the Phase 8.2 instrumentation.
-Result: **it fails at step one, before any LazerRender code is even compiled.**
+The pin was moved from `2026.821.0-tachyon` to `2026.918.0-tachyon`. This was a **toolchain migration**,
+not a routine bump: the stream crossed .NET versions between those tags.
 
 ```
 pin   2026.821.0-tachyon : TargetFramework net8.0  : global.json 8.0.100  : ppy.osu.Framework 2026.807.0
@@ -173,27 +173,33 @@ pin   2026.821.0-tachyon : TargetFramework net8.0  : global.json 8.0.100  : ppy.
       2026.918.0-tachyon : TargetFramework net10.0 : global.json 10.0.100 : ppy.osu.Framework 2026.917.0
 ```
 
-Building `LazerRender.Game` against `2026.918.0-tachyon` with the host SDK 8.0.131 gave, for all five
-submodule projects:
+A first attempt against `2026.918.0-tachyon` with only SDK 8 installed failed before any LazerRender code
+compiled, for all five submodule projects:
 
 ```
 error NETSDK1045: The current .NET SDK does not support targeting .NET 10.0.
-        Either target .NET 8.0 or lower, or use a version of the .NET SDK that supports .NET 10.0.
 ```
 
-**Conclusion:** the tachyon stream crossed from .NET 8 to .NET 10 between `2026.821.0` and
-`2026.909.0`. A re-pin is therefore a **toolchain migration**, not a routine bump:
+What the successful migration actually took:
 
-1. Install a .NET 10 SDK.
-2. Retarget `LazerRender.Game` (`TargetFramework`) and the service (`LazerRender.Service` projects) to
-   `net10.0`; check `LangVersion`/`Nullable` still apply.
-3. Update the container image base / runtime (`Dockerfile`) and any `DEPLOYMENT.md` runtime pin.
-4. Re-derive the dependency closure (`dotnet list ... package --include-transitive`) and re-assess the
-   silenced `AutoMapper` advisory — see [`SECURITY.md`](SECURITY.md) §6.
-5. Only then run the feature smoke matrix in §4.4.
+1. Install a .NET 10 SDK **and the ASP.NET Core 10 shared runtime**. The SDK alone is not enough to *run*
+   the web half: `dotnet test` aborts with `app-launch-failed` until `Microsoft.AspNetCore.App 10.x` is
+   installed alongside `Microsoft.NETCore.App 10.x`.
+2. Retarget `LazerRender.Game`, `LazerRender.Contracts`, `LazerRender.Api` and the test project to
+   `net10.0`.
+3. Bump the service packages in `LazerRender.Service/Directory.Packages.props`: EF Core `10.0.12`,
+   test SDK `18.10.1`, xunit `2.9.3`, xunit.runner.visualstudio `3.1.5` (Swashbuckle stays Debug-only).
+   Restore rewrites the `packages.lock.json` files.
+4. Point the container at the .NET 10 images — which are **Ubuntu 24.04 (noble)**, not Debian bookworm.
+   The apt block moved to `libasound2t64` and the `bookworm-backports` workaround was dropped (noble's
+   Weston 13 already serves the headless path); see `DEPLOYMENT.md` §11 for the GPU/Mesa caveat.
+5. **Local SDK gotcha:** a standalone .NET 10 SDK whose package-pruning data is incomplete fails the web
+   project with `NETSDK1226`. The root `Directory.Build.props` sets `AllowMissingPrunePackageData` for
+   that case.
 
-The dry run was reverted; the pin is unchanged. **Until the toolchain is moved, do not fetch a tag newer
-than `2026.821.0-tachyon` onto a build host — it cannot build.**
+**Outcome:** the engine builds clean in Debug and Release against `2026.918.0-tachyon`; a 38 s test
+replay rendered to a valid MP4 with no degraded-path warnings; the service suite is 114/114. **No tachyon
+API breakage (class A/B/C) was hit** — the couplings in §5.4 did not drift.
 
 ### 4.3 The mechanics of a bump that *is* compatible
 
@@ -400,5 +406,5 @@ LAZERRENDER_DEBUG=1 LazerRender.Game/scripts/run-headless.sh \
 
 # Service startup smoke test (confirms the log pipeline + hosted services come up)
 ASPNETCORE_URLS=http://127.0.0.1:5199 timeout 12 \
-  dotnet LazerRender.Service/src/LazerRender.Api/bin/Debug/net8.0/LazerRender.Api.dll
+  dotnet LazerRender.Service/src/LazerRender.Api/bin/Debug/net10.0/LazerRender.Api.dll
 ```

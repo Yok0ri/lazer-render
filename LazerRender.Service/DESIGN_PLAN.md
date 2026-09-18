@@ -12,7 +12,7 @@ integration contract in [`WEB_GUI_GUIDE.md`](../LazerRender.Game/WEB_GUI_GUIDE.m
 | Decision | Choice | Rationale |
 |---|---|---|
 | Deployment model | Public multi-user, single self-hosted server, one GPU | Stated MVP goal |
-| Backend stack | **ASP.NET Core (.NET 8)** | Single toolchain with the engine, shared JSON contracts, SignalR, BackgroundService worker |
+| Backend stack | **ASP.NET Core (.NET 10)** | Single toolchain with the engine, shared JSON contracts, SignalR, BackgroundService worker |
 | Database | **SQLite** (EF Core) | Zero-ops on one server; upgrade path to PostgreSQL is a connection-string change |
 | Queue | **In-process `Channel` + DB-backed job table** | Crash recovery and multi-GPU expansion without Redis/RabbitMQ |
 | Message broker | **Not needed for MVP** (see §7) | See §7 |
@@ -425,7 +425,7 @@ cancellations are not retried. The sweep also handles: `CANCELLING` jobs whose p
 
 ## 11. Tech stack comparison
 
-| Criterion | ASP.NET Core (.NET 8) | Node.js (Fastify/NestJS) | Python (FastAPI) |
+| Criterion | ASP.NET Core (.NET 10) | Node.js (Fastify/NestJS) | Python (FastAPI) |
 |---|---|---|---|
 | Same toolchain as engine | **Yes** (one `dotnet` runtime) | No | No |
 | Shared JSON contracts | **Yes** (class library + `System.Text.Json`) | Partial (types duplicated) | Partial (pydantic re-typed) |
@@ -436,8 +436,8 @@ cancellations are not retried. The sweep also handles: `CANCELLING` jobs whose p
 | Ops footprint | One runtime | Node runtime + .NET (engine) | Python + .NET (engine) |
 | Team familiarity | C# (engine is C#) | Depends | Depends |
 
-**Recommendation: ASP.NET Core (.NET 8).** The decisive factors are: the engine already runs on
-.NET 8 so a single `dotnet` toolchain deploys everything; the render-config and progress JSON
+**Recommendation: ASP.NET Core (.NET 10).** The decisive factors are: the engine already runs on
+.NET 10 so a single `dotnet` toolchain deploys everything; the render-config and progress JSON
 contracts can be a shared class library referenced by both the API and (optionally) future
 LazerRender changes; SignalR provides in-process WebSocket progress with zero extra services; EF
 Core + SQLite is a zero-ops database on one server. FastAPI would be a reasonable second choice if

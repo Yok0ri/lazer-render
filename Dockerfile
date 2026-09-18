@@ -15,7 +15,7 @@
 # of the card you want to render on (`--device /dev/dri/renderD128`). See DEPLOYMENT.md §11.
 
 # ---------- build ----------
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # The context includes LazerRender.Game/extern/osu (the pinned submodule) because the engine cannot be
@@ -30,7 +30,7 @@ RUN dotnet publish LazerRender.Game/LazerRender.Game.csproj $PUBLISH_ARGS -o /ou
 RUN dotnet publish LazerRender.Service/src/LazerRender.Api/LazerRender.Api.csproj $PUBLISH_ARGS -o /out/api
 
 # ---------- runtime ----------
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 
 # ffmpeg CLI      — the engine pipes raw frames to it and the service probes it for the encoder backend.
 # weston + Mesa   — run-headless.sh stands up a headless compositor so the engine gets a real,
@@ -40,16 +40,16 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 #                   as a fallback for GPUs the container's radeonsi cannot drive; it costs ~10 MB.
 # curl            — container healthcheck against /health.
 #
-# Mesa and Weston are deliberately taken from bookworm-backports rather than the release. Bookworm
-# ships Mesa 22.3 and Weston 10, both of which predate current GPU families (e.g. the AMD RDNA4 /
-# gfx1200 parts): Mesa 22.3 cannot drive them at all, and Weston 10's headless backend is old enough
-# that the engine's capture pipeline wedges on the first frame. The backports Mesa 25.x / Weston 14.x
-# work. Only Mesa, Weston and their direct dependencies come from backports.
+# .NET 10's Linux images are Ubuntu 24.04 (noble), not Debian bookworm. That changes two things from
+# the original container work: noble ships Weston 13, which already understands
+# `--backend=headless --renderer=gl` (the runner probes for the spelling), and `libasound2` is now
+# `libasound2t64`. The earlier bookworm-backports workaround for Mesa 22.3/Weston 10 is therefore
+# obsolete and removed. Mesa is the distro's build here; noble-updates currently ships Mesa 25.x (the
+# version the bookworm image needed for RDNA4/gfx1200), so a current pull should cover modern GPUs — but
+# re-check DEPLOYMENT.md §11 before relying on it for a very new part.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
- && echo "deb http://deb.debian.org/debian bookworm-backports main" > /etc/apt/sources.list.d/backports.list \
- && apt-get update \
  && apt-get install -y --no-install-recommends \
+      ca-certificates \
       ffmpeg \
       libegl1 \
       libgles2 \
@@ -57,9 +57,8 @@ RUN apt-get update \
       libwayland-client0 \
       libwayland-server0 \
       libxkbcommon0 \
-      libasound2 \
+      libasound2t64 \
       curl \
- && apt-get install -y --no-install-recommends -t bookworm-backports \
       weston \
       libgl1-mesa-dri \
       libegl-mesa0 \

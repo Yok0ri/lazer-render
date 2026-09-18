@@ -32,10 +32,14 @@ stable-stream pinning strategy: Tachyon tags are opt-in pre-releases, so treat e
 this stream as a regression event, not a routine version bump.
 
 ```bash
-git -C LazerRender.Game/extern/osu fetch --depth 1 origin tag 2026.821.0-tachyon
-git -C LazerRender.Game/extern/osu checkout 2026.821.0-tachyon
+git -C LazerRender.Game/extern/osu fetch --depth 1 origin tag 2026.918.0-tachyon
+git -C LazerRender.Game/extern/osu checkout 2026.918.0-tachyon
 git add LazerRender.Game/extern/osu   # record the new gitlink in the super-project
 ```
+
+The current pin targets **.NET 10**: the tachyon stream moved from .NET 8 to .NET 10 in the
+`2026.909.0` tag, so the whole repository was retargeted with the bump. See *Phase 8 status — the
+.NET 10 tachyon rebase* below and [`MAINTENANCE.md`](MAINTENANCE.md) §4.
 
 `osu.Game` consumes `ppy.osu.Framework` and `ppy.osu.Game.Resources` from NuGet, so only the
 `osu.Game` and ruleset projects need to be referenced from
@@ -54,7 +58,7 @@ server can accumulate a library over time.
 ### Import a beatmap
 
 ```bash
-dotnet LazerRender.Game/bin/Debug/net8.0/LazerRender.dll \
+dotnet LazerRender.Game/bin/Debug/net10.0/LazerRender.dll \
     --import-map path/to/beatmap.osz \
     --storage LazerRender.Game/storage
 ```
@@ -65,7 +69,7 @@ source archive is consumed (moved into managed file storage) after a successful 
 ### Import a skin
 
 ```bash
-dotnet LazerRender.Game/bin/Debug/net8.0/LazerRender.dll \
+dotnet LazerRender.Game/bin/Debug/net10.0/LazerRender.dll \
     --import-skin path/to/skin.osk \
     --storage LazerRender.Game/storage
 ```
@@ -75,7 +79,7 @@ Imports a legacy skin package into the persistent Realm database.
 ### Purge beatmaps / skins
 
 ```bash
-dotnet LazerRender.Game/bin/Debug/net8.0/LazerRender.dll \
+dotnet LazerRender.Game/bin/Debug/net10.0/LazerRender.dll \
     --purge all \
     --storage LazerRender.Game/storage
 ```
@@ -87,7 +91,7 @@ server cleanup mechanism.
 ### Render a replay
 
 ```bash
-dotnet LazerRender.Game/bin/Debug/net8.0/LazerRender.dll \
+dotnet LazerRender.Game/bin/Debug/net10.0/LazerRender.dll \
     --replay path/to/replay.osr \
     --skin "Skin Name" \
     --output out \
@@ -257,7 +261,7 @@ Legacy aliases (still accepted): `--disable-storyboard` (→ `--no-storyboard`),
 ## Web service (Phase 5)
 
 The repository also ships a complete web service that turns the recorder into a multi-user,
-o!rdr-like app: an ASP.NET Core (.NET 8) API plus a zero-dependency vanilla-JS single-page frontend.
+o!rdr-like app: an ASP.NET Core (.NET 10) API plus a zero-dependency vanilla-JS single-page frontend.
 
 ### Layout
 
@@ -581,7 +585,7 @@ by **Web service (Phase 5)** above, and Phase 6 by **Phase 6 status** at the end
   merged into one `--hud <keys...>` flag (JSON `hud`), with `--help`, the docs and the SPA updated to
   match.
 
-## Phase 8 status — Docker deployment (8.1)
+## Phase 8 status — Docker deployment, observability & the .NET 10 rebase
 
 ### Working
 
@@ -598,6 +602,30 @@ by **Web service (Phase 5)** above, and Phase 6 by **Phase 6 status** at the end
   **5180**, render-node-only GPU passthrough, `shm_size: 1gb`, `init: true`, named volumes for
   `/app/data` and `/app/keys`, and `.env`-driven settings (OAuth client, `AllowedHosts`,
   `Proxy__KnownProxies`/`KnownNetworks`, admin ids).
+
+### Additional — the .NET 10 tachyon rebase
+
+Beyond the numbered sub-phases, Phase 8 also carried the pin forward and moved the whole repository
+from .NET 8 to .NET 10 — this was forced, not optional: the tachyon stream crossed
+`net8.0 → net10.0` between tags `2026.821.0` and `2026.909.0`, so *any* further bump required it.
+
+- **Pin** → `2026.918.0-tachyon` (engine `extern/osu` gitlink), targeting `net10.0` and
+  `ppy.osu.Framework 2026.917.0`.
+- **Retargeted** the engine, `LazerRender.Contracts`, `LazerRender.Api` and the test project to
+  `net10.0`, and bumped the service packages to match: EF Core `10.0.12`, test SDK `18.10.1`,
+  xunit `2.9.3`, xunit.runner.visualstudio `3.1.5` (Swashbuckle stays Debug-only).
+- **Container** moved to the .NET 10 images. Those are **Ubuntu 24.04 (noble)**, not Debian bookworm,
+  so the Dockerfile's apt block was rewritten (`libasound2t64`, no `bookworm-backports`); noble's
+  Weston 13 already serves the headless path, though a GPU needing newer-than-noble Mesa still needs a
+  different base — see [`DEPLOYMENT.md`](LazerRender.Service/DEPLOYMENT.md) §11.
+- **No tachyon API breakage:** the engine compiled clean against the new pin in Debug and Release, and
+  a 38-second test replay rendered to a valid MP4 (~208 fps) with no degraded-path warnings (no
+  `HitsoundMixer`/`FramedBeatmapClock`/HUD-filter warnings) — i.e. none of the reflection/heuristic
+  couplings in [`MAINTENANCE.md`](MAINTENANCE.md) §5.4 drifted.
+- **Service suite:** 114/114 on .NET 10.
+- **Local build note:** a standalone .NET 10 SDK whose package-pruning data is incomplete fails the
+  web project with `NETSDK1226`; the root [`Directory.Build.props`](Directory.Build.props:1) sets
+  `AllowMissingPrunePackageData` for that case.
 
 ### Fixed on the way
 

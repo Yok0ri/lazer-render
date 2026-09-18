@@ -237,11 +237,12 @@ inventory) and [`SECURITY.md`](SECURITY.md) is the security model.
       and cancellation is unchanged from bare metal; a bare `docker run` needs `--init` for the same
       shape. Shutdown was verified live: `stop` on a running service container exits `0` with
       "Application is shutting down..." well inside the grace period.
-- [x] Settle the deployment shape for 8.3's **Render PC** card. The card must be designed against the
-      *container*, not the host: Debian bookworm base, .NET 8.0.31 (ASP.NET Core runtime), **FFmpeg
-      5.1.9** from Debian (report it — it is a behavioural variable, see 8.1 notes below), Mesa 25.0.7
-      and Weston 14.0.2 from `bookworm-backports`, only the render nodes the operator passed, and
-      cgroup-visible CPU/RAM rather than host totals. `/dev/shm` must be ≥1 GB for 1440p/4K.
+- [x] Settle the deployment shape for 8.3's **Render PC** card. The card is designed against the
+      *container*, not the host: as of the .NET 10 rebase the image is the .NET 10 runtime on **Ubuntu
+      24.04 "noble"** (it was Debian bookworm / .NET 8.0.31 at 8.1 verification), with the distro's
+      **FFmpeg** (report it — it is a behavioural variable), distro Mesa/Weston, only the render nodes the
+      operator passed, and cgroup-visible CPU/RAM rather than host totals. `/dev/shm` must be ≥1 GB for
+      1440p/4K.
 
 **Verification evidence.** A 38 s test replay rendered *inside the container* at ~270 fps — identical
 to the same replay on bare metal — producing a valid 1280×720@60 h264 + AAC 44.1 kHz MP4 of the same
@@ -313,9 +314,11 @@ Pure consumer of 8.2, designed against 8.1's deployment shape and the audit's re
       repair breakage caused by osu! API changes, and a comprehensive how-to for both. The fragility
       inventory is now inline in `MAINTENANCE.md` §5.4–§5.5.
 - [x] Validate it against a real exercise rather than theory: perform one tachyon re-pin (or a dry-run
-      bump) using the 8.2 instrumentation, and write the workflow from what actually broke. The dry run
-      (`2026.821.0` → `2026.918.0-tachyon`) found the stream moved from .NET 8 to .NET 10, so a bump is
-      a toolchain migration; the runbook records the exact `NETSDK1045` failure and the tag boundary.
+      bump) using the 8.2 instrumentation, and write the workflow from what actually broke. A dry run
+      (`2026.821.0` → `2026.918.0-tachyon`) found the stream had moved from .NET 8 to .NET 10, so the
+      bump became a toolchain migration; the runbook records the exact `NETSDK1045` failure, the tag
+      boundary and the migration steps. (The migration itself was then executed — see the .NET 10 note
+      in `README.md`'s Phase 8 status.)
 - [x] Document the debug workflow end to end: how to build and run debug versus release, and how to read
       the logs to identify issues without an AI model.
 
@@ -327,12 +330,12 @@ Pure consumer of 8.2, designed against 8.1's deployment shape and the audit's re
 - [ ] Verify the published tree contains no secrets or personal leftovers (tokens, keys, local paths,
       dev-server credentials) before the first push.
 - [ ] Document project setup — in particular that the pinned `extern/osu` submodule must be
-      initialised, which is what a fresh clone currently lacks. Note the **.NET 10 boundary**: the pin
-      `2026.821.0-tachyon` builds on SDK 8, but every tag from `2026.909.0` needs SDK 10 (see
-      [`MAINTENANCE.md`](MAINTENANCE.md) §4.2).
+      initialised, which is what a fresh clone currently lacks. The project now requires the **.NET 10
+      SDK and the ASP.NET Core 10 runtime** (see [`MAINTENANCE.md`](MAINTENANCE.md) §4.2 for why, and the
+      `NETSDK1226` note in `README.md`).
 - [ ] Publish, and record the publish steps so the release can be repeated.
 
-**Repository state for this sub-phase (as of Phase 8.4).** No git remote is configured, so the 8.1–8.4
+**Repository state for this sub-phase (as of the .NET 10 rebase).** No git remote is configured, so the
 commits are local-only and publishing also means adding a remote. The document set kept in the project
 is `README.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `MAINTENANCE.md`, `SECURITY.md`,
 `LazerRender.Game/WEB_GUI_GUIDE.md`, `LazerRender.Service/DEPLOYMENT.md` and

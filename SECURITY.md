@@ -174,9 +174,9 @@ Considered and deliberately **not** changed:
 
 | Item | Assessment |
 |---|---|
-| Service packages | Pinned centrally (`LazerRender.Service/Directory.Packages.props` + per-project `packages.lock.json`): EF Core `8.0.11`, Swashbuckle `6.6.2` (Debug-only), test SDK/xunit pinned. |
+| Service packages | Pinned centrally (`LazerRender.Service/Directory.Packages.props` + per-project `packages.lock.json`): EF Core `10.0.12`, Swashbuckle `6.6.2` (Debug-only), test SDK `18.10.1`, xunit `2.9.3` / runner `3.1.5`. |
 | Engine dependencies | Five `ProjectReference`s into `extern/osu`; no `PackageReference` of its own. The closure (`ManagedBass*`, `ImageSharp`, `Silk.NET`, `Veldrid`) arrives transitively and must be re-derived on every submodule bump (`dotnet list ... --include-transitive`). |
-| osu! submodule | `ppy/osu` @ `2026.821.0-tachyon` (gitlink). See [`MAINTENANCE.md`](MAINTENANCE.md:1) §4 — the stream has since moved to .NET 10, so the pin cannot advance without a toolchain migration. |
+| osu! submodule | `ppy/osu` @ `2026.918.0-tachyon` (gitlink), `net10.0`. The .NET 8 → .NET 10 migration is recorded in [`MAINTENANCE.md`](MAINTENANCE.md:1) §4.2; the pin cannot advance further without repeating that kind of toolchain check. |
 | `AutoMapper 13.0.1` | `NU1903` silenced upstream ("does not affect us"). **Unverified upstream claim** — re-assess on every bump. |
 | `Sentry 6.6.0` | Present transitively; no initialisation found in our engine code. Re-confirm on a logging/bump change. |
 | FFmpeg / `setsid` / `weston` | Resolved at runtime; the one concatenated FFmpeg arg string is engine-generated. |

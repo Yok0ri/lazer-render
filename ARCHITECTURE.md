@@ -34,7 +34,7 @@ of beatmaps and skins, and exposes a command-line interface plus a machine-reada
 CLI into a multi-user, o!rdr-like site: a user logs in with their **osu! account** (OAuth v2),
 uploads a replay, picks render settings, and the service queues the job, runs the engine **one job at
 a time**, streams progress back, stores the finished `.mp4`, and lets the user download it. It is an
-**ASP.NET Core (.NET 8)** API + SQLite database + a **vanilla-JS single-page app** (no framework, no
+**ASP.NET Core (.NET 10)** API + SQLite database + a **vanilla-JS single-page app** (no framework, no
 build step).
 
 The two halves never share in-process code: the service invokes the engine exactly like a shell user
@@ -69,7 +69,7 @@ LazerRender/
 Three things are not ordinary C#:
 
 - [`LazerRender.Game/extern/osu`](LazerRender.Game/extern/osu) is a **git submodule** pinned to a specific release tag
-  (`2026.821.0-tachyon`). It is the actual game code. Never edit it directly; re-pin it with git.
+  (`2026.918.0-tachyon`). It is the actual game code. Never edit it directly; re-pin it with git.
 - **FFmpeg** is an external binary on `PATH`. The engine spawns it for encoding; the service spawns
   it for encoder probing.
 - **Weston** is an external headless compositor used by `run-headless.sh` to give the engine a
@@ -86,7 +86,7 @@ Both halves are self-contained products; the only cross-boundary dependency is t
 dotnet build LazerRender.sln
 ```
 
-The build outputs `LazerRender.Game/bin/Debug/net8.0/LazerRender.dll`. The engine needs a real
+The build outputs `LazerRender.Game/bin/Debug/net10.0/LazerRender.dll`. The engine needs a real
 GPU-backed EGL context but no visible window; on a headless server it runs under a throwaway Weston
 compositor:
 
@@ -257,7 +257,7 @@ LazerRender.Game/                    All recorder C# code + engine assets
 Only two things are not ordinary C#:
 
 - [`LazerRender.Game/extern/osu`](LazerRender.Game/extern/osu) is a **git submodule** pinned to a specific release tag
-  (`2026.821.0-tachyon`). It is the actual game code. Never edit it directly; re-pin it with git.
+  (`2026.918.0-tachyon`). It is the actual game code. Never edit it directly; re-pin it with git.
 - **FFmpeg** is an external binary on `PATH`. LazerRender spawns it as a child process.
 
 ### 2.3 Build and run (engine)
@@ -266,7 +266,7 @@ Only two things are not ordinary C#:
 dotnet build LazerRender.sln
 ```
 
-The build outputs `LazerRender.Game/bin/Debug/net8.0/LazerRender.dll`.
+The build outputs `LazerRender.Game/bin/Debug/net10.0/LazerRender.dll`.
 
 LazerRender needs a real GPU-backed EGL context (it renders with OpenGL), but no visible window. For
 a truly headless server you run it under a throwaway Weston compositor:
@@ -818,7 +818,7 @@ an *empty* input, which is what rule 3 guarantees.
 
 ### 2.9 External dependencies (engine)
 
-- **[`LazerRender.Game/extern/osu`](LazerRender.Game/extern/osu)** — pinned `ppy/osu` checkout (submodule), tag `2026.821.0-tachyon`.
+- **[`LazerRender.Game/extern/osu`](LazerRender.Game/extern/osu)** — pinned `ppy/osu` checkout (submodule), tag `2026.918.0-tachyon`.
 - **osu.Framework / osu.Game.Resources** — NuGet packages consumed by `osu.Game`.
 - **ManagedBass** — BASS audio library bindings for offline music/hitsound decoding.
 - **FFmpeg** — external binary on `PATH` (h264 encoding + muxing).
@@ -925,7 +925,7 @@ o!rdr-like site):
   finished `.mp4`.
 - The user downloads the video later.
 
-The service is an **ASP.NET Core (.NET 8)** application with:
+The service is an **ASP.NET Core (.NET 10)** application with:
 
 - a **REST API** under `/api/v1`,
 - a **SQLite** database for users, jobs, skins and presets,
@@ -938,7 +938,7 @@ are:
 1. **No message broker.** Because one home server has one GPU, jobs are serialized with an in-process
    queue (a SQLite table + a semaphore). Redis/RabbitMQ would add operational cost for no throughput
    gain at this scale.
-2. **ASP.NET Core over Node/Python.** The engine is C# on .NET 8, so the API shares the runtime,
+2. **ASP.NET Core over Node/Python.** The engine is C# on .NET 10, so the API shares the runtime,
    gives strongly-typed contracts, and can host a background service (`BackgroundService`) and
    SignalR for free.
 
@@ -1865,7 +1865,7 @@ queued jobs.
 
 - **The LazerRender engine** — invoked as a child process via [`LazerRender.Game/scripts/run-headless.sh`](LazerRender.Game/scripts/run-headless.sh:1);
   requires a GPU-backed EGL context, Weston for headless, and FFmpeg on `PATH`.
-- **ASP.NET Core / EF Core 8** — the web framework and SQLite provider (`Microsoft.EntityFrameworkCore.Sqlite`).
+- **ASP.NET Core / EF Core 10** — the web framework and SQLite provider (`Microsoft.EntityFrameworkCore.Sqlite`).
 - **SignalR** — part of ASP.NET Core, no extra package.
 - **Swashbuckle** — Swagger UI generation (`SwaggerGen`).
 - **osu! OAuth v2** — external identity provider (endpoints configured in `Osu:OAuth`).

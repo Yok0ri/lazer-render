@@ -16,6 +16,14 @@
   <PropertyGroup>
     <DefineConstants Condition="'$(Configuration)' == 'Debug'">$(DefineConstants);LAZERRENDER_DEBUG</DefineConstants>
     <DefineConstants Condition="'$(LazerRenderDebug)' == 'true'">$(DefineConstants);LAZERRENDER_DEBUG</DefineConstants>
+
+    <!--
+      .NET 10 package pruning needs the framework's PruneData files, which some SDK installs (notably a
+      standalone SDK 10 without the matching ASP.NET Core targeting pack) do not ship. Without this the
+      build fails with NETSDK1226 on the web project. The opt-out only disables pruning analysis; it does
+      not change the produced binaries materially.
+    -->
+    <AllowMissingPrunePackageData>true</AllowMissingPrunePackageData>
   </PropertyGroup>
 
 </Project>
