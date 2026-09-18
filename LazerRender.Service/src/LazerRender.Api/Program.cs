@@ -59,12 +59,17 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     }
 });
 
-// The app itself never binds an HTTPS endpoint (the public proxy terminates TLS), so the redirect
-// middleware cannot infer a port and logs "Failed to determine the https port" whenever it needs to
-// redirect. Give it the public one; it only takes effect outside Development (see below), so a local
-// http://localhost run is unaffected.
-builder.Services.AddHttpsRedirection(options =>
-    options.HttpsPort = builder.Configuration.GetValue("HttpsRedirection:HttpsPort", 443));
+// TLS terminates at the public proxy, which is also what performs the HTTP->HTTPS redirect
+// (Cloudflare/Caddy do this unconditionally). The app has no HTTPS listener of its own, so an
+// app-level redirect can only work if the public HTTPS port is spelled out; without one the middleware
+// logs "Failed to determine the https port for redirect" on every plain-HTTP request and does nothing.
+// Keep it opt-in: with HttpsRedirection:HttpsPort unset there is no redirect and no warning, so a
+// direct http://host:5180 container run (and the local http://localhost dev run) stays reachable.
+int? httpsRedirectPort = builder.Configuration.GetValue<int?>("HttpsRedirection:HttpsPort");
+if (httpsRedirectPort is not null)
+{
+    builder.Services.AddHttpsRedirection(options => options.HttpsPort = httpsRedirectPort);
+}
 
 // --- JSON serialization ---
 builder.Services
@@ -376,9 +381,12 @@ if (!app.Environment.IsDevelopment())
     // HSTS only makes sense once the app knows it is behind TLS (see the forwarded-headers setup above)
     // and only in production, so a local http run is never pinned to HTTPS by its own browser.
     app.UseHsts();
+}
 
-    // HTTPS redirection is likewise a production concern: the app only ever speaks plain HTTP behind
-    // the proxy, and a local http://localhost run must stay usable.
+// Only redirect to HTTPS when the operator configured the public port (see the registration above).
+// Behind the shipped proxy deployment the forwarded scheme is already https, so this is inert there.
+if (httpsRedirectPort is not null)
+{
     app.UseHttpsRedirection();
 }
 
