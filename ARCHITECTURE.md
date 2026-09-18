@@ -52,9 +52,8 @@ LazerRender/
 ├── README.md                        User-facing overview
 ├── ROADMAP.md                       Phased development plan
 ├── ARCHITECTURE.md                  This file (engine + service)
-├── MAINTENANCE.md                   Routine-workflow notes (WIP)
-├── SECURITY_AUDIT_CONTEXT.md        Hand-off briefing for the Phase 7 security audit
-├── MAINTENANCE_INFRA_CONTEXT.md     Hand-off briefing for the Phase 8 observability design
+├── MAINTENANCE.md                   Maintenance runbook (re-pin, breakage repair, debug workflow)
+├── SECURITY.md                      Security model, finding register and accepted risks
 ├── Dockerfile                       Two-stage image holding both halves (section 1.6)
 ├── docker-compose.yml               Compose stack for Docker / Portainer (section 1.6)
 ├── .dockerignore                    Keeps build output, runtime data and dev/ out of the context
@@ -717,8 +716,8 @@ The engine half of the Phase 8.2 debug/release distinction. `Log(string)` is mar
 Release builds; the symbol is defined for Debug builds by the repository-root
 [`Directory.Build.props`](Directory.Build.props:1) (and can be forced in Release with
 `-p:LazerRenderDebug=true`). `LogRuntime(string)` covers diagnostics that must stay switchable without
-a rebuild — it is inert unless `LAZERRENDER_DEBUG=1` is set. See Phase 8.2 in
-[`PHASE_8_LOGGING_CONTEXT.md`](PHASE_8_LOGGING_CONTEXT.md:1).
+a rebuild — it is inert unless `LAZERRENDER_DEBUG=1` is set. See [`MAINTENANCE.md`](MAINTENANCE.md:1) §2
+for the full debug-vs-release matrix.
 
 ### 2.6 The two osu! config managers
 
@@ -933,7 +932,7 @@ The service is an **ASP.NET Core (.NET 8)** application with:
 - a **single serialized background worker** that invokes the engine,
 - a **vanilla-JS single-page app** (no framework, no build step) served from `wwwroot`.
 
-The two big design decisions (documented in [`PHASE_5_PLAN_DESIGN.md`](LazerRender.Service/PHASE_5_PLAN_DESIGN.md))
+The two big design decisions (documented in [`DESIGN_PLAN.md`](LazerRender.Service/DESIGN_PLAN.md))
 are:
 
 1. **No message broker.** Because one home server has one GPU, jobs are serialized with an in-process
@@ -966,7 +965,7 @@ The service is **self-contained**: everything it needs to build, run, test and d
 LazerRender.Service/
 ├── LazerRender.Service.sln          Solution (Api + Contracts + Tests)
 ├── DEPLOYMENT.md                    Deployment, configuration and systemd guide
-├── PHASE_5_PLAN_DESIGN.md           Service design (job lifecycle, architecture choices)
+├── DESIGN_PLAN.md                   Service design (job lifecycle, architecture choices)
 ├── deploy/
 │   ├── Caddyfile                    Reverse-proxy (TLS termination) example
 │   └── lazerrender.service          systemd unit
@@ -1468,7 +1467,9 @@ cached field; `SystemInfoWarmupService` (a `BackgroundService`) fills it once at
 endpoint's `?refresh=true` recomputes on demand. Every probe is best-effort and isolated (`/proc`,
 `/sys/class/drm`, `ffmpeg -version`, `DriveInfo` on the results volume), so a missing capability
 yields a null field rather than a failed request. Collection runs off the request thread, so the
-panel never blocks (or is blocked by) the render worker.
+panel never blocks (or is blocked by) the render worker. Inside the container these values come from
+the **host kernel** (`/proc`, `/sys`) and the mounted results volume, not cgroup limits — reporting
+cgroup-visible CPU/RAM is an open follow-up.
 
 ##### [`LogStreamService.cs`](LazerRender.Service/src/LazerRender.Api/Services/LogStreamService.cs:20) / [`LogRetentionService.cs`](LazerRender.Service/src/LazerRender.Api/Services/LogRetentionService.cs:14)
 
@@ -1709,7 +1710,7 @@ beatmap_cache (Md5*, Imported, DownloadedAt, Title, Artist, Creator, Version, St
 
 ### 3.8 The job lifecycle (state machine)
 
-The full design in [`PHASE_5_PLAN_DESIGN.md`](LazerRender.Service/PHASE_5_PLAN_DESIGN.md) had
+The full design in [`DESIGN_PLAN.md`](LazerRender.Service/DESIGN_PLAN.md) had
 more states; the MVP short-circuits validation, so the practical flow is:
 
 ```
@@ -1850,7 +1851,11 @@ The backend supports **both**:
 - **Polling** — the SPA currently polls `GET /api/v1/jobs?limit=100` every 2 s
   ([`startTimers`](LazerRender.Service/src/LazerRender.Api/wwwroot/app.js:863)) and patches cards in
   place. This was chosen for simplicity (no reconnect logic); the hub remains the drop-in path for a
-  realtime upgrade. Admin stats poll every 15 s.
+  realtime upgrade. Admin stats poll every 15 s, and the Phase 8.3 console logs poll the buffer
+  endpoints for the same reason.
+  > If SignalR is ever wired into the SPA, note that `AddSignalR` does **not** inherit the MVC JSON
+  > options: enums serialize as numbers by default, so `AddJsonProtocol(...)` must add a
+  > `JsonStringEnumConverter` for `LogRecord`/`RenderProgress` payloads to match the REST shape.
 
 The frontend renders a **determinate** bar when the job has a `total` (the engine reports the natural
 replay length), an **indeterminate** bar when it's active but unbounded, and a queue position for
@@ -1961,9 +1966,10 @@ buffers are separate instances so a new sink decides which stream it wants.
 | [`README.md`](README.md) | User-facing overview and per-phase status. |
 | [`ROADMAP.md`](ROADMAP.md) | Phased development plan. |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | This file — the whole project (engine + service). |
-| [`MAINTENANCE.md`](MAINTENANCE.md) | Routine workflow notes (osu! version bumps, debugging) — work in progress. |
+| [`MAINTENANCE.md`](MAINTENANCE.md) | The maintenance runbook: debug vs release, reading the logs, the tachyon re-pin procedure, the fragility inventory, and the breakage-repair playbook. |
+| [`SECURITY.md`](SECURITY.md) | The security model: assets, trust boundaries, the finding register and its status, accepted risks and the endpoint authorization map. |
 | [`LazerRender.Game/WEB_GUI_GUIDE.md`](LazerRender.Game/WEB_GUI_GUIDE.md) | The engine's CLI/supervisor contract, from the caller's perspective. |
-| [`LazerRender.Service/PHASE_5_PLAN_DESIGN.md`](LazerRender.Service/PHASE_5_PLAN_DESIGN.md) | The service's original design (job lifecycle, architecture choices). |
+| [`LazerRender.Service/DESIGN_PLAN.md`](LazerRender.Service/DESIGN_PLAN.md) | The service's original design (job lifecycle, architecture choices). |
 | [`LazerRender.Service/DEPLOYMENT.md`](LazerRender.Service/DEPLOYMENT.md) | Service deployment, configuration, systemd, backups, TLS. |
 | [`dev/prompts/`](dev/prompts) | Historical task prompts (not shipped). |
 | [`dev/reports/`](dev/reports) | Historical progress/design reports (not shipped). |
@@ -1980,7 +1986,8 @@ The repository is organized as **two self-contained products plus shared dev not
   and its own `scripts/publish-service.sh`.
 - **`dev/`** holds working notes (prompts + reports) and is never shipped.
 - Top-level `.md` files are the cross-cutting docs: `README.md`, `ROADMAP.md`, `ARCHITECTURE.md`,
-  `MAINTENANCE.md`.
+  `MAINTENANCE.md`, `SECURITY.md` (plus the per-product docs `WEB_GUI_GUIDE.md`, `DEPLOYMENT.md`,
+  `DESIGN_PLAN.md`).
 
 Conventions that follow from this:
 

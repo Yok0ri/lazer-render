@@ -100,7 +100,7 @@ player.
 
 If you do configure a fallback, `Renderer__OsuBotRefreshToken` must be a **user** refresh token
 issued by this application's authorization-code grant — see
-[`WEB_GUI_GUIDE.md`](LazerRender.Game/WEB_GUI_GUIDE.md) §6 and
+[`WEB_GUI_GUIDE.md`](../LazerRender.Game/WEB_GUI_GUIDE.md) §6 and
 `LazerRender.Game/scripts/fetch-user-token.sh`. Client-credentials tokens are guest-scoped and will
 not enable the scoreboard.
 

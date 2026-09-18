@@ -129,16 +129,16 @@ This document outlines the phased development plan for building a headless, fast
 ## ✅ Phase 7 — Security Audit & Hardening (Completed)
 
 The full security audit — threat model, authn/authz review, rate limiting, upload handling, secret
-handling and the exposure of a Cloudflare + NGinx-fronted public deployment — will be performed by
-another model. `SECURITY_AUDIT_CONTEXT.md` is that model's hand-off briefing: it maps every auth,
-credential, network, IPC, filesystem and user-input surface with code excerpts. This phase is assurance
+handling and the exposure of a Cloudflare + NGinx-fronted public deployment — was performed in this
+phase. Its durable output is [`SECURITY.md`](SECURITY.md): the assets, trust boundaries, the finding
+register and its status, and the accepted risks. This phase is assurance
 only; the observability work that used to live here has moved to Phase 8, behind the infrastructure it
 depends on.
 
 ### 7.1 Hardening backlog (produced by the audit)
 
-The audit is complete: see [`SECURITY_AUDIT_REPORT.md`](SECURITY_AUDIT_REPORT.md) — 5 High (P0), 11
-Medium (P1) and 11 Low (P2) findings, each with evidence, a recommendation and a verification step.
+The audit is complete: see [`SECURITY.md`](SECURITY.md) §3 — 5 High (P0), 11
+Medium (P1) and 11 Low (P2) findings, each with a recommendation and a verification step.
 
 **P0 — before any public exposure (implemented):**
 
@@ -176,7 +176,7 @@ Medium (P1) and 11 Low (P2) findings, each with evidence, a recommendation and a
 - [x] **M-8** Beatmap packages get their own size cap and archives are checked for bomb shapes before
       import; `Renderer:DownloadMissing=false` and engine-user isolation are documented.
 - [x] **M-9** *Partial* — the service warns at startup while `AllowedHosts` is unrestricted. Setting it
-      to the real hostname is a deployment step (see `SECURITY_AUDIT_REPORT.md` and `DEPLOYMENT.md` §12).
+      to the real hostname is a deployment step (see [`SECURITY.md`](SECURITY.md) §5/§7 and `DEPLOYMENT.md` §12).
 - [x] **M-10** Quota check and insert are serialised by `JobCreationGate`, and `jobs.DisplayNumber` now
       has a unique index.
 - [x] **M-11** The session has an absolute lifetime (7 days, no sliding, plus an `auth_time` check in the
@@ -201,21 +201,20 @@ Medium (P1) and 11 Low (P2) findings, each with evidence, a recommendation and a
 - [x] **L-10** The systemd unit no longer points `Documentation=` at the osu! submodule, and the mirror
       comment matches the code.
 - [x] **L-11** Central package management plus `packages.lock.json` for the service half, and the
-      transitive inventory recorded in `MAINTENANCE_INFRA_CONTEXT.md` §8 for the next submodule bump.
+      transitive inventory recorded in [`SECURITY.md`](SECURITY.md) §6 for the next submodule bump.
 
 Phase 7 is done: the audit's remaining items are the deliberate acceptances recorded in
-`SECURITY_AUDIT_REPORT.md` §8, and the deployment-side steps called out in the rows above.
+[`SECURITY.md`](SECURITY.md) §5, and the deployment-side steps called out in the rows above.
 
 Each item is closed with its verification evidence: a test, a reproduction, or a written justification
 for accepting the risk.
 
-## 🚧 Phase 8 — Docker, Observability & Release (8.1–8.3 complete)
+## 🚧 Phase 8 — Docker, Observability & Release (8.1–8.4 complete)
 
-Sub-phases 8.1 (Docker), 8.2 (logging & instrumentation core) and 8.3 (admin observability panel) are
-implemented and verified. The maintenance/debug docs (8.4) and the release (8.5) remain.
-`MAINTENANCE_INFRA_CONTEXT.md` is the hand-off briefing for that work;
-`PHASE_8_LOGGING_CONTEXT.md` records what 8.2 built, and `PHASE_8_3_CONTEXT.md` what 8.3 built and
-what 8.4/9 consume.
+Sub-phases 8.1 (Docker), 8.2 (logging & instrumentation core), 8.3 (admin observability panel) and 8.4
+(`MAINTENANCE.md` + debug-workflow docs) are implemented and verified; the release (8.5) remains.
+`MAINTENANCE.md` is the runbook (self-contained: debug/release, log reading, re-pin, fragility
+inventory) and [`SECURITY.md`](SECURITY.md) is the security model.
 
 ### 8.1 Docker deployment ✅
 
@@ -308,14 +307,16 @@ Pure consumer of 8.2, designed against 8.1's deployment shape and the audit's re
       (Done as a reflection guard over every `AdminController` action's `[Authorize(Roles="admin")]`,
       the project's established authz-test style — no HTTP host package is available offline.)
 
-### 8.4 MAINTENANCE.md & debug workflow docs
+### 8.4 MAINTENANCE.md & debug workflow docs ✅
 
-- [ ] Write `MAINTENANCE.md`: what to watch for when rebasing onto a newer Tachyon release, how to
-      repair breakage caused by osu! API changes, and a comprehensive how-to for both. Use the
-      fragility inventory in `MAINTENANCE_INFRA_CONTEXT.md` as the starting checklist.
-- [ ] Validate it against a real exercise rather than theory: perform one tachyon re-pin (or a dry-run
-      bump) using the 8.2 instrumentation, and write the workflow from what actually broke.
-- [ ] Document the debug workflow end to end: how to build and run debug versus release, and how to read
+- [x] Write `MAINTENANCE.md`: what to watch for when rebasing onto a newer Tachyon release, how to
+      repair breakage caused by osu! API changes, and a comprehensive how-to for both. The fragility
+      inventory is now inline in `MAINTENANCE.md` §5.4–§5.5.
+- [x] Validate it against a real exercise rather than theory: perform one tachyon re-pin (or a dry-run
+      bump) using the 8.2 instrumentation, and write the workflow from what actually broke. The dry run
+      (`2026.821.0` → `2026.918.0-tachyon`) found the stream moved from .NET 8 to .NET 10, so a bump is
+      a toolchain migration; the runbook records the exact `NETSDK1045` failure and the tag boundary.
+- [x] Document the debug workflow end to end: how to build and run debug versus release, and how to read
       the logs to identify issues without an AI model.
 
 ### 8.5 GitHub release
@@ -326,8 +327,16 @@ Pure consumer of 8.2, designed against 8.1's deployment shape and the audit's re
 - [ ] Verify the published tree contains no secrets or personal leftovers (tokens, keys, local paths,
       dev-server credentials) before the first push.
 - [ ] Document project setup — in particular that the pinned `extern/osu` submodule must be
-      initialised, which is what a fresh clone currently lacks.
+      initialised, which is what a fresh clone currently lacks. Note the **.NET 10 boundary**: the pin
+      `2026.821.0-tachyon` builds on SDK 8, but every tag from `2026.909.0` needs SDK 10 (see
+      [`MAINTENANCE.md`](MAINTENANCE.md) §4.2).
 - [ ] Publish, and record the publish steps so the release can be repeated.
+
+**Repository state for this sub-phase (as of Phase 8.4).** No git remote is configured, so the 8.1–8.4
+commits are local-only and publishing also means adding a remote. The document set kept in the project
+is `README.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `MAINTENANCE.md`, `SECURITY.md`,
+`LazerRender.Game/WEB_GUI_GUIDE.md`, `LazerRender.Service/DEPLOYMENT.md` and
+`LazerRender.Service/DESIGN_PLAN.md`; everything else was removed so links in the kept docs are internal.
 - [ ] Add a prominent warning at the top of `README.md` that the project is 100% vibe-coded.
 
 ## ⬜ Phase 9 — New Features (Planned)

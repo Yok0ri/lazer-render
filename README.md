@@ -306,7 +306,8 @@ Secrets (OAuth client id/secret) are supplied via environment variables, never c
 [`LazerRender.Service/DEPLOYMENT.md`](LazerRender.Service/DEPLOYMENT.md) for the systemd +
 self-contained publish recipe and the container stack (`docker compose up -d --build`, host port
 5180, GPU passthrough and volumes), and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the in-depth
-walkthrough of every file (engine + service).
+walkthrough of every file (engine + service). The security model is in [`SECURITY.md`](SECURITY.md),
+and the version-bump / debugging runbook in [`MAINTENANCE.md`](MAINTENANCE.md).
 
 ### Observability & debugging (Phase 8.2–8.3)
 
@@ -341,7 +342,7 @@ The authoritative plan is [`ROADMAP.md`](ROADMAP.md). Status at a glance:
 | 5 | The web API daemon | ✅ completed |
 | 6 | Render & web UX refinements | ✅ completed |
 | 7 | Security audit & hardening | ✅ audit complete; P0-P2 hardening done |
-| 8 | Docker, observability & release | 🚧 8.1–8.3 done (Docker, logging core, admin panel) — 8.4–8.5 planned |
+| 8 | Docker, observability & release | 🚧 8.1–8.4 done (Docker, logging core, admin panel, maintenance runbook) — 8.5 planned |
 | 9 | New features (replay viewer, strain graph) | ⬜ planned |
 
 The `Phase N status` sections below are a chronological record of engine work — a few later-phase
