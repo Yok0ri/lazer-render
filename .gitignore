@@ -43,8 +43,16 @@ captures/
 .env
 
 # Private working notes (AI advice, progress reports, task prompts).
-# Documented as "not shipped" in ARCHITECTURE.md; excluded per ROADMAP Phase 8.5.
 dev/
+
+# Private working docs — kept locally, never published. Only README.md and
+# LazerRender.Game/WEB_GUI_GUIDE.md ship with the repository.
+/ARCHITECTURE.md
+/MAINTENANCE.md
+/ROADMAP.md
+/SECURITY.md
+/LazerRender.Service/DEPLOYMENT.md
+/LazerRender.Service/DESIGN_PLAN.md
 
 # LazerRender runtime data (web service storage + engine realm/ini/db)
 # Never commit these: they hold the SQLite DB, the Data Protection key ring,

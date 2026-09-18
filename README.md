@@ -1,8 +1,8 @@
 # LazerRender
 
 > ⚠️ **This project is 100% vibe-coded.** It was built end-to-end by AI assistants with a human in the
-> loop. It works, but expect rough edges, sparse comments in places, and a few cargo-culted decisions.
-> Read the code before you trust it with anything important.
+> loop, mostly for the author's personal use. It works, but expect rough edges, sparse comments in
+> places, and a few cargo-culted decisions. Read the code before relying on it.
 
 A native-lazer, headless, faster-than-realtime replay recorder. LazerRender wraps the real
 [`ppy/osu`](https://github.com/ppy/osu) engine (pinned as a submodule) instead of reimplementing gameplay,
@@ -137,8 +137,7 @@ goes to `LazerRender.Service/src/LazerRender.Api/data/` (gitignored).
 
 ## Deployment (quick guide)
 
-The full reference is [`LazerRender.Service/DEPLOYMENT.md`](LazerRender.Service/DEPLOYMENT.md). The short
-version:
+A short version:
 
 ### Docker (Linux, macOS, Windows)
 
@@ -187,8 +186,7 @@ refresh token — keep it out of image layers and back it up if you care about e
 
 ## Roadmap
 
-The authoritative, detailed plan is [`ROADMAP.md`](ROADMAP.md); the long-form engineering history is its
-appendix. At a glance:
+Status at a glance:
 
 | Phase | Theme | Status |
 |---|---|---|
@@ -199,7 +197,7 @@ appendix. At a glance:
 | 5 | The web API daemon | ✅ done |
 | 6 | Render & web UX refinements | ✅ done |
 | 7 | Security audit & hardening | ✅ done |
-| 8 | Docker, observability & release | 🚧 8.1–8.4 done; 8.5 (GitHub release) pending |
+| 8 | Docker, observability & release | ✅ done |
 | 9 | New features (browser replay viewer, strain graph) | ⬜ planned |
 
 Recent Phase 8 work: a single container image + compose stack, an in-memory logging/instrumentation core,
@@ -208,13 +206,7 @@ an admin observability panel, a maintenance runbook, and a **.NET 10 rebase** of
 
 ## Documentation
 
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — how every file fits together (engine + service).
 - [`WEB_GUI_GUIDE.md`](LazerRender.Game/WEB_GUI_GUIDE.md) — the CLI/supervisor contract for building on top.
-- [`DEPLOYMENT.md`](LazerRender.Service/DEPLOYMENT.md) — deployment, configuration, systemd, TLS, backups.
-- [`MAINTENANCE.md`](MAINTENANCE.md) — debug/release workflow, log reading, osu! re-pin runbook.
-- [`SECURITY.md`](SECURITY.md) — threat model, the audit's finding register and accepted risks.
-- [`ROADMAP.md`](ROADMAP.md) — phased plan + phase history.
-- [`DESIGN_PLAN.md`](LazerRender.Service/DESIGN_PLAN.md) — the service's original design rationale.
 
 ## License
 
