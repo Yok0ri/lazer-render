@@ -70,6 +70,10 @@ services:
       # Optional fallback osu! bot credential (a user refresh token issued to this application).
       Renderer__OsuBotRefreshToken: "${OSU_BOT_REFRESH_TOKEN:-}"
 
+      # Verbose admin-panel console capture: lowers both in-memory ring buffers to Debug and enables the
+      # engine's runtime diagnostics. Leave unset for the default Information-level capture.
+      LAZERRENDER_DEBUG: "${LAZERRENDER_DEBUG:-}"
+
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5080/health"]
       interval: 30s

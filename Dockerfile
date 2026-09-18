@@ -38,6 +38,10 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 #                   these are the system pieces it does not supply itself.
 # Mesa Vulkan     — only needed if an operator forces the Zink driver (LAZERRENDER_MESA_DRIVER=zink)
 #                   as a fallback for GPUs the container's radeonsi cannot drive; it costs ~10 MB.
+# Mesa VA-API     — provides the *_drv_video.so state trackers (radeonsi_drv_video.so, etc.) that
+#                   ffmpeg's h264_vaapi and the service's encoder probe load. The GL packages above do
+#                   NOT include them, so without this the probe fails and every render falls back to
+#                   libx264 (the service reports "Encoder: CPU (auto-detected)").
 # curl            — container healthcheck against /health.
 #
 # .NET 10's Linux images are Ubuntu 24.04 (noble), not Debian bookworm. That changes two things from
@@ -65,6 +69,7 @@ RUN apt-get update \
       libglx-mesa0 \
       libgbm1 \
       mesa-vulkan-drivers \
+      mesa-va-drivers \
  && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --uid 10001 --create-home --shell /usr/sbin/nologin lazerrender

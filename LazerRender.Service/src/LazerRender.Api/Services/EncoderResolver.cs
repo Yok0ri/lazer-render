@@ -44,10 +44,18 @@ public sealed class EncoderResolver
 
     private EncoderKind Detect()
     {
-        if (ProbeAmd()) return EncoderKind.Amd;
-        if (ProbeNvidia()) return EncoderKind.Nvidia;
-        if (ProbeIntel()) return EncoderKind.Intel;
-        return EncoderKind.Cpu;
+        var resolved = EncoderKind.Cpu;
+
+        if (ProbeAmd())
+            resolved = EncoderKind.Amd;
+        else if (ProbeNvidia())
+            resolved = EncoderKind.Nvidia;
+        else if (ProbeIntel())
+            resolved = EncoderKind.Intel;
+
+        logger.LogInformation("Encoder auto-detection selected {Encoder}.", resolved);
+
+        return resolved;
     }
 
     private bool ProbeAmd()
@@ -128,7 +136,17 @@ public sealed class EncoderResolver
                 return false;
             }
 
-            return process.ExitCode == 0;
+            if (process.ExitCode == 0)
+                return true;
+
+            // The probe output is a few lines (ffmpeg runs at -loglevel error), so reading it after exit
+            // cannot block; surfacing it is what makes a silent CPU fallback diagnosable.
+            string error = process.StandardError.ReadToEnd().Trim();
+            logger.LogDebug(
+                "Encoder probe {Kind} failed with exit code {ExitCode}: {Error}",
+                kind, process.ExitCode, error);
+
+            return false;
         }
         catch (Exception e)
         {
