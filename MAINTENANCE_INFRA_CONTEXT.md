@@ -397,6 +397,12 @@ Release engine binary (currently it does not).
 
 ## 4. The admin control panel (current capabilities — the basis for Phase 8.3)
 
+> **Phase 8.3 implemented.** The panel is now split into Users, Library, Render PC and Console logs;
+> the logging surfaces described below as missing exist as `LogStreamService` + the
+> `GET/POST /api/v1/admin/logs*` endpoints and `SystemInfoService` for the Render PC card. See
+> [`PHASE_8_3_CONTEXT.md`](PHASE_8_3_CONTEXT.md:1). Everything below describes the pre-8.3 state and is
+> retained as the historical basis for the design.
+
 ### 4.1 Where it lives
 
 **Frontend:** `LazerRender.Service/src/LazerRender.Api/wwwroot/index.html` (markup),
@@ -462,6 +468,10 @@ Cards inside `#tab-admin`:
 The admin panel is refreshed on a timer (`state.adminTimer`, every 15 s) and on tab init.
 
 ### 4.3 Does it have a logging/monitoring surface a debug output could hook into?
+
+> **Phase 8.3 update.** It now does: the two ring buffers (Phase 8.2) are read through
+> `LogStreamService`, and the panel polls them only while open. The console-log streaming is a
+> pull model, not SignalR (see [`PHASE_8_3_CONTEXT.md`](PHASE_8_3_CONTEXT.md:1)).
 
 **No — and this is an explicit flag for you.**
 

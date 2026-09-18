@@ -345,4 +345,38 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .preset-item button { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 0 2px; }
 .preset-item button:hover { color: var(--err); }
 
+/* Admin: Render PC summary (a two-column definition list) */
+.pc-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  gap: 6px 18px;
+  margin: 12px 0 0;
+  font-size: 0.85rem;
+}
+.pc-grid dt { color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.74rem; padding-top: 2px; }
+.pc-grid dd { margin: 0; color: var(--text); word-break: break-word; }
+
+/* Admin: Console logs */
+#logs-view {
+  min-height: 220px;
+  max-height: 460px;
+  overflow: auto;
+  background: #0b0b12;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  scroll-behavior: smooth;
+}
+.log-line { display: block; }
+.log-line.info { color: var(--text); }
+.log-line.debug { color: var(--muted); }
+.log-line.warn { color: var(--warn); }
+.log-line.error { color: var(--err); }
+
 [hidden] { display: none !important; }

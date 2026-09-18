@@ -47,6 +47,16 @@ public class RingLogBuffer : ILogSink
     /// <summary>How many records this buffer has evicted over its lifetime (observability for the UI).</summary>
     public long DroppedCount => Interlocked.Read(ref dropped);
 
+    /// <summary>Number of records currently retained (cheap check for the idle sweeper and the UI).</summary>
+    public int Count
+    {
+        get
+        {
+            lock (gate)
+                return count;
+        }
+    }
+
     /// <summary>Whether any consumer is currently watching, used by Phase 8.3's capture gate.</summary>
     public int SubscriberCount => Volatile.Read(ref subscribers);
 

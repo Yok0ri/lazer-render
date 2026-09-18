@@ -233,35 +233,55 @@
           <section class="card">
             <h2>Queue</h2>
             <p id="queue-stats" class="muted"></p>
+          </section>
+          <section class="card">
+            <h2>Library</h2>
+            <p class="muted">Purging removes beatmaps or skins from the shared engine library.</p>
             <div class="row">
               <button class="btn" data-purge="skins" type="button">Purge skins</button>
               <button class="btn" data-purge="beatmaps" type="button">Purge beatmaps</button>
               <button class="btn" data-purge="all" type="button">Purge all</button>
             </div>
           </section>
-          <section class="card">
-            <h2>Allow a user</h2>
-            <form id="allow-form" class="row-end">
-              <label class="field">
-                <span>osu! user ID</span>
-                <input type="number" id="allow-id" placeholder="e.g. 7562902" />
-              </label>
-              <label class="field">
-                <span>or username</span>
-                <input type="text" id="allow-name" placeholder="e.g. peppy" />
-              </label>
-              <button type="submit" class="btn primary">Allow</button>
-            </form>
-            <p id="allow-status" class="muted" role="status"></p>
-          </section>
         </div>
-        <section class="card">
-          <h2>Render PC</h2>
-          <p id="encoder-info" class="muted">Detecting encoder…</p>
-        </section>
+
         <section class="card">
           <h2>Users</h2>
+          <form id="allow-form" class="row-end">
+            <label class="field">
+              <span>osu! user ID</span>
+              <input type="number" id="allow-id" placeholder="e.g. 7562902" />
+            </label>
+            <label class="field">
+              <span>or username</span>
+              <input type="text" id="allow-name" placeholder="e.g. peppy" />
+            </label>
+            <button type="submit" class="btn primary">Allow</button>
+          </form>
+          <p id="allow-status" class="muted" role="status"></p>
           <div id="users-list"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>Render PC</h2>
+            <button class="btn" id="render-pc-refresh" type="button">Refresh</button>
+          </div>
+          <dl id="render-pc" class="pc-grid muted"><dd>Collecting…</dd></dl>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>Console logs</h2>
+            <div class="row">
+              <button class="btn" data-log-source="service" type="button">Service</button>
+              <button class="btn" data-log-source="engine" type="button">Engine</button>
+              <button class="btn ghost" id="logs-close" type="button">Close</button>
+              <label class="check"><input type="checkbox" id="logs-follow" checked /> Follow</label>
+            </div>
+          </div>
+          <p id="logs-meta" class="muted" role="status"></p>
+          <pre id="logs-view" class="log-console" aria-live="polite"></pre>
         </section>
       </section>
     </section>

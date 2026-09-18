@@ -209,12 +209,13 @@ Phase 7 is done: the audit's remaining items are the deliberate acceptances reco
 Each item is closed with its verification evidence: a test, a reproduction, or a written justification
 for accepting the risk.
 
-## 🚧 Phase 8 — Docker, Observability & Release (8.1 and 8.2 complete)
+## 🚧 Phase 8 — Docker, Observability & Release (8.1–8.3 complete)
 
-Sub-phases 8.1 (Docker) and 8.2 (logging & instrumentation core) are implemented and verified. The
-admin observability panel (8.3) and the maintenance/debug docs (8.4) remain. `MAINTENANCE_INFRA_CONTEXT.md`
-is the hand-off briefing for that design work; `PHASE_8_LOGGING_CONTEXT.md` records what 8.2 built and
-the interfaces 8.3/8.4 consume.
+Sub-phases 8.1 (Docker), 8.2 (logging & instrumentation core) and 8.3 (admin observability panel) are
+implemented and verified. The maintenance/debug docs (8.4) and the release (8.5) remain.
+`MAINTENANCE_INFRA_CONTEXT.md` is the hand-off briefing for that work;
+`PHASE_8_LOGGING_CONTEXT.md` records what 8.2 built, and `PHASE_8_3_CONTEXT.md` what 8.3 built and
+what 8.4/9 consume.
 
 ### 8.1 Docker deployment ✅
 
@@ -282,26 +283,30 @@ length and size. `/health` returns 200 with the CSP and security headers, `/app/
       runtime and source-build paths. `run-headless.sh` still defaults to Debug and now supports an
       opt-in Release build.
 
-### 8.3 Admin observability panel
+### 8.3 Admin observability panel ✅
 
 Pure consumer of 8.2, designed against 8.1's deployment shape and the audit's redaction findings.
 
-- [ ] Split the admin tab into explicit sections: **Users** (existing allow/revoke), **Library**
+- [x] Split the admin tab into explicit sections: **Users** (existing allow/revoke), **Library**
       (existing purge), **Render PC** and **Console logs**.
-- [ ] **Render PC**: grow the existing encoder readout (today the card's only content) into a
+- [x] **Render PC**: grow the existing encoder readout (today the card's only content) into a
       hardware/software summary — CPU, GPU plus driver/API, RAM, free space on the results volume,
       the FFmpeg build, the engine's .NET runtime and the resolved `--encoder` backend.
-- [ ] **Render PC**: collect the summary once at startup and refresh on demand rather than on every
+- [x] **Render PC**: collect the summary once at startup and refresh on demand rather than on every
       request; nothing in the panel should block the render worker.
-- [ ] **Console logs**: two independent streams — **engine** (the recorder child process) and
+- [x] **Console logs**: two independent streams — **engine** (the recorder child process) and
       **service** (this API/worker) — so a failed render can be diagnosed without shell access.
-- [ ] **Console logs**: do not write logs to disk continuously. Stream only while an admin has the
+- [x] **Console logs**: do not write logs to disk continuously. Stream only while an admin has the
       panel open — a bounded in-memory ring buffer for the service stream, and a tee of the engine's
       stdout/stderr while a render is running — and retain nothing once the panel disconnects.
-- [ ] Keep the panel admin-only as it grows. Every admin route must enforce the role **server-side**
+      (The panel polls rather than pushing: the SPA ships no SignalR client and the CSP forbids a CDN.
+      Polling renews a server-side lease; Close and an idle sweeper empty the stream.)
+- [x] Keep the panel admin-only as it grows. Every admin route must enforce the role **server-side**
       (never by hiding UI), and every destructive or state-changing control must be authorized
       against the database `Role`, consistent with how `QuotaService` reads it.
-- [ ] Add regression tests asserting that a non-admin session receives 401/403 on every admin route.
+- [x] Add regression tests asserting that a non-admin session receives 401/403 on every admin route.
+      (Done as a reflection guard over every `AdminController` action's `[Authorize(Roles="admin")]`,
+      the project's established authz-test style — no HTTP host package is available offline.)
 
 ### 8.4 MAINTENANCE.md & debug workflow docs
 

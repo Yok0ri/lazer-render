@@ -297,7 +297,8 @@ written to `LazerRender.Service/src/LazerRender.Api/data/` (gitignored).
 - **Map metadata** — the replay's beatmap MD5 is resolved against the engine (`--map-info`) so job
   cards show `Artist — Title [Version]` instead of "Render #N".
 - **Skins & presets** — import `.osk` skins and save/reuse render presets.
-- **Admin** — allow/revoke users and purge the shared beatmap/skin library.
+- **Admin** — allow/revoke users, purge the shared beatmap/skin library, and inspect the render host
+  (a hardware/software "Render PC" summary plus live **service** and **engine** console logs).
 
 ### Configuration & deployment
 
@@ -307,13 +308,19 @@ self-contained publish recipe and the container stack (`docker compose up -d --b
 5180, GPU passthrough and volumes), and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the in-depth
 walkthrough of every file (engine + service).
 
-### Observability & debugging (Phase 8.2)
+### Observability & debugging (Phase 8.2–8.3)
 
 The service keeps a bounded, **in-memory** log pipeline; nothing is written to disk. Two independent
 ring buffers are filled — **service** (this API/worker, mirrored from `ILogger` by an
 `ILoggerProvider`) and **engine** (the recorder child process's stdout/stderr, classified into
 Warning/Information/Debug). Every record is redacted before it is stored, so an osu! token can never
-reach a browser. The Phase 8.3 admin console is a read-only consumer of these buffers.
+reach a browser.
+
+The admin tab (Phase 8.3) is the consumer: it is split into **Users**, **Library**, **Render PC** and
+**Console logs**. "Render PC" is a collected-once-at-startup summary (CPU, memory, GPU + driver,
+FFmpeg build, resolved encoder, .NET runtime, free space on the results volume) with a manual Refresh.
+"Console logs" shows the service and engine streams independently; it polls only while the panel is
+open and empties a stream as soon as it is closed, so nothing is retained for a tab nobody is watching.
 
 Buffer sizes and minimum levels live under the `Observability` section of `appsettings.json`. Set
 `LAZERRENDER_DEBUG=1` to drop both streams to Debug at runtime (a Debug build does this by default);
@@ -334,7 +341,7 @@ The authoritative plan is [`ROADMAP.md`](ROADMAP.md). Status at a glance:
 | 5 | The web API daemon | ✅ completed |
 | 6 | Render & web UX refinements | ✅ completed |
 | 7 | Security audit & hardening | ✅ audit complete; P0-P2 hardening done |
-| 8 | Docker, observability & release | 🚧 8.1 (Docker) and 8.2 (logging core) done — 8.3–8.5 planned |
+| 8 | Docker, observability & release | 🚧 8.1–8.3 done (Docker, logging core, admin panel) — 8.4–8.5 planned |
 | 9 | New features (replay viewer, strain graph) | ⬜ planned |
 
 The `Phase N status` sections below are a chronological record of engine work — a few later-phase

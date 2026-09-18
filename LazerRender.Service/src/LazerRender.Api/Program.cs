@@ -220,6 +220,14 @@ builder.Services.AddSingleton<ServiceLogRingBuffer>();
 builder.Services.AddSingleton<EngineLogRingBuffer>();
 builder.Services.AddSingleton<ILoggerProvider, RingBufferLoggerProvider>();
 
+// --- Admin observability (Phase 8.3) ---
+// The Render PC summary is collected once at startup by a hosted service; the log streams are polled
+// by the panel while it is open, with an idle sweeper so nothing is retained after it closes.
+builder.Services.AddSingleton<SystemInfoService>();
+builder.Services.AddSingleton<LogStreamService>();
+builder.Services.AddHostedService<SystemInfoWarmupService>();
+builder.Services.AddHostedService<LogRetentionService>();
+
 // --- Realtime progress + render worker ---
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<JobCancellationService>();

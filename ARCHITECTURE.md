@@ -1122,6 +1122,12 @@ The single log record model of the Phase 8.2 pipeline, shared with the (Phase 8.
 enum rather than `Microsoft.Extensions.Logging.LogLevel` because this project has no package
 references. `Sequence` is per-buffer and monotonic, so a consumer polls with the last sequence it saw.
 
+##### [`AdminDtos.cs`](LazerRender.Service/src/LazerRender.Contracts/AdminDtos.cs:1)
+
+Phase 8.3 panel DTOs: `LogSnapshotDto` (a delta page plus `Dropped`/`Capacity`/`MinimumSeverity`/
+`Cleared`) and `RenderPcDto` (the best-effort hardware/software summary — OS, .NET runtime, CPU,
+memory, GPU + driver, FFmpeg, resolved encoder, results-volume free space, collection time).
+
 #### 3.6.2 `LazerRender.Api` — the web application
 
 ##### [`Program.cs`](LazerRender.Service/src/LazerRender.Api/Program.cs:15) — composition root
@@ -1455,6 +1461,23 @@ A second `BackgroundService` that runs hourly and deletes result files whose `Re
 passed. It keeps the job row for history and only removes the `.mp4` and its (now empty) result
 directory, nulling `OutputPath`/`ResultSize` so the download button disappears.
 
+##### [`SystemInfoService.cs`](LazerRender.Service/src/LazerRender.Api/Services/SystemInfoService.cs:18) / [`SystemInfoWarmupService.cs`](LazerRender.Service/src/LazerRender.Api/Services/SystemInfoWarmupService.cs:11)
+
+Phase 8.3's "Render PC" summary. `SystemInfoService` collects the summary behind a semaphore and a
+cached field; `SystemInfoWarmupService` (a `BackgroundService`) fills it once at startup, and the
+endpoint's `?refresh=true` recomputes on demand. Every probe is best-effort and isolated (`/proc`,
+`/sys/class/drm`, `ffmpeg -version`, `DriveInfo` on the results volume), so a missing capability
+yields a null field rather than a failed request. Collection runs off the request thread, so the
+panel never blocks (or is blocked by) the render worker.
+
+##### [`LogStreamService.cs`](LazerRender.Service/src/LazerRender.Api/Services/LogStreamService.cs:20) / [`LogRetentionService.cs`](LazerRender.Service/src/LazerRender.Api/Services/LogRetentionService.cs:14)
+
+The Phase 8.3 lifecycle layer over the two ring buffers. Because the SPA ships no SignalR client (and
+the CSP forbids a CDN), the panel **polls**: each `Poll` returns the delta after a sequence and renews
+that stream's lease. `Release` empties a stream immediately (the panel's Close action) and
+`LogRetentionService` sweeps streams idle for 20 s, so a killed tab retains nothing. `TryParseSource`
+is the single validator for the `service`/`engine` wire names.
+
 ##### `Services/Logging/` — the Phase 8.2 log pipeline
 
 The one pipeline both the admin console (Phase 8.3) and the local debug workflow consume. Nothing is
@@ -1539,6 +1562,11 @@ Skins and beatmaps:
 - `POST /api/v1/admin/users/allow` — allow by `osuUserId` or resolve by `username` (needs
   `Renderer:AvatarApiKey`/`OSU_API_KEY`).
 - `POST /api/v1/admin/users/revoke` — flip `IsAllowed = false`.
+- `GET /api/v1/admin/render-pc` — the Phase 8.3 Render PC summary (cached; `?refresh=true` recomputes).
+- `GET /api/v1/admin/logs?source=service|engine&after=<seq>` — a delta page of a console-log stream;
+  polling renews the stream's lease.
+- `POST /api/v1/admin/logs/close?source=service|engine` — release and empty a stream; omitting
+  `source` closes both.
 
 ##### [`MetaController.cs`](LazerRender.Service/src/LazerRender.Api/Controllers/MetaController.cs:11)
 
@@ -1576,7 +1604,8 @@ The markup shell with four panels (`#login-panel`, `#app`, and the tabs `render`
 Audio) whose control ids map 1:1 to `RenderConfig` keys. The HUD group's `hud-only-*` checkboxes
 (one per HUD element, all on by default, split into three visual groups) are the whitelist; a master
 `#hud-master` checkbox selects or deselects them all. The admin tab is hidden until `loadMe()` sees
-an admin role; it carries the render-PC encoder readout (`#encoder-info`).
+an admin role; it is split into Queue/Library, Users, Render PC (`#render-pc`) and Console logs
+(`#logs-view`) sections.
 
 ##### [`app.js`](LazerRender.Service/src/LazerRender.Api/wwwroot/app.js:1)
 
@@ -1591,7 +1620,8 @@ The entire client in one file (~880 lines). Key pieces:
   app, and loads non-critical data via `Promise.allSettled` (so a failure in skins/presets/etc. never
   masks a successful login).
 - [`switchTab()`](LazerRender.Service/src/LazerRender.Api/wwwroot/app.js:97) — shows a tab panel;
-  leaving the Jobs tab collapses any expanded job.
+  leaving the Jobs tab collapses any expanded job, and leaving the Admin tab closes the Console logs
+  panel (which releases its stream server-side).
 - [`buildConfig()`](LazerRender.Service/src/LazerRender.Api/wwwroot/app.js:262) /
   [`applyConfig()`](LazerRender.Service/src/LazerRender.Api/wwwroot/app.js:297) — serialize the form
   into a `RenderConfig` and back (used by presets). The HUD checklist is collected into `hud`
@@ -1622,6 +1652,14 @@ The entire client in one file (~880 lines). Key pieces:
   job is expanded at a time.
 - [`startTimers()`](LazerRender.Service/src/LazerRender.Api/wwwroot/app.js:863) — polls `loadJobs()`
   every 2 s (and admin stats every 15 s for admins).
+- [`loadRenderPc()`](LazerRender.Service/src/LazerRender.Api/wwwroot/app.js:1) — fetches the Phase 8.3
+  Render PC summary into `#render-pc`; the card's Refresh button re-fetches with `?refresh=true`.
+- [`openLogs()`](LazerRender.Service/src/LazerRender.Api/wwwroot/app.js:1) /
+  [`pollLogs()`](LazerRender.Service/src/LazerRender.Api/wwwroot/app.js:1) /
+  [`closeLogs()`](LazerRender.Service/src/LazerRender.Api/wwwroot/app.js:1) — the Console logs panel.
+  Only one stream is watched at a time; it is polled once a second with the last-seen `sequence`,
+  appended into a bounded DOM list (severity-coloured), and released server-side on Close or when the
+  Admin tab is left, which empties that stream's buffer.
 
 #### 3.6.9 `tests/LazerRender.Worker.Tests` — unit tests
 
@@ -1638,6 +1676,10 @@ xUnit tests using in-memory SQLite:
   Phase 8.2: ring-buffer bounds/eviction/delta/concurrency/subscription, the service
   `ILoggerProvider` capture and redaction, engine classification + buffering, and an end-to-end
   assertion that the render runner feeds the engine buffer with redacted lines.
+- [`AdminObservabilityTests.cs`](LazerRender.Service/tests/LazerRender.Worker.Tests/AdminObservabilityTests.cs:23) —
+  Phase 8.3: reflection guard that every action on `AdminController` carries the admin-role
+  requirement (so a new endpoint cannot ship unprotected), the log-stream poll/delta/clear/idle
+  lifecycle, stale-cursor detection, source parsing, and the Render PC summary shape.
 
 #### 3.6.10 `deploy/` — production artifacts
 
@@ -1756,6 +1798,9 @@ All routes are cookie-authenticated unless marked **anon**. Errors are `{ "error
 | GET | `/api/v1/admin/users` | admin | All accounts |
 | POST | `/api/v1/admin/users/allow` | admin | Allow by id or username |
 | POST | `/api/v1/admin/users/revoke` | admin | Revoke access |
+| GET | `/api/v1/admin/render-pc` | admin | Render PC summary (`?refresh=true`) |
+| GET | `/api/v1/admin/logs` | admin | Console-log delta (`source`, `after`) |
+| POST | `/api/v1/admin/logs/close` | admin | Release + clear a log stream |
 | GET | `/health` | anon | Liveness probe |
 | `/hubs/jobs` | — | user | SignalR progress hub |
 

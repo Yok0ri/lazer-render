@@ -7,8 +7,10 @@ It deliberately does **not** repeat material already in [`ROADMAP.md`](ROADMAP.m
 [`ARCHITECTURE.md`](ARCHITECTURE.md:1219) §3.6.5,
 [`MAINTENANCE_INFRA_CONTEXT.md`](MAINTENANCE_INFRA_CONTEXT.md:1) or the security audit.
 
-**Status.** 8.2 implemented and verified: engine builds Debug + Release, service builds Debug, service
-test suite 99/99 (was 91; `LoggingPipelineTests` adds 8).
+**Status.** 8.2 implemented and verified (engine builds Debug + Release, service builds Debug).
+**Phase 8.3 has since been built on top of it** — see [`PHASE_8_3_CONTEXT.md`](PHASE_8_3_CONTEXT.md:1).
+The consumption contract in §2 was used as specified, with one design change: the panel **polls**
+rather than using SignalR, because the SPA ships no SignalR client and the CSP forbids a CDN.
 
 ---
 
@@ -116,6 +118,9 @@ a global admin stream.
 ---
 
 ## 5. Notes for 8.3's remaining scope (not in 8.2)
+
+> **Done in 8.3.** This section was the 8.3 to-do list; it is retained for the rationale. See
+> [`PHASE_8_3_CONTEXT.md`](PHASE_8_3_CONTEXT.md:1) for what was actually built.
 
 - **Console logs endpoint**: a `GET /api/v1/admin/logs?source=service|engine&after=<seq>` returning
   `LogRecord[]` is the smallest REST shape that fits `Snapshot`; a SignalR stream is the push variant

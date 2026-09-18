@@ -19,6 +19,8 @@ public sealed class AdminController : ControllerBase
     private readonly AppDbContext db;
     private readonly OsuOAuthService osu;
     private readonly RendererOptions rendererOptions;
+    private readonly SystemInfoService systemInfo;
+    private readonly LogStreamService logStream;
     private readonly ILogger<AdminController> logger;
 
     public AdminController(
@@ -27,6 +29,8 @@ public sealed class AdminController : ControllerBase
         AppDbContext db,
         OsuOAuthService osu,
         IOptions<RendererOptions> rendererOptions,
+        SystemInfoService systemInfo,
+        LogStreamService logStream,
         ILogger<AdminController> logger)
     {
         this.storage = storage;
@@ -34,7 +38,54 @@ public sealed class AdminController : ControllerBase
         this.db = db;
         this.osu = osu;
         this.rendererOptions = rendererOptions.Value;
+        this.systemInfo = systemInfo;
+        this.logStream = logStream;
         this.logger = logger;
+    }
+
+    /// <summary>
+    /// The Render PC summary. Served from the startup-collected cache; pass <c>refresh=true</c> (the
+    /// card's Refresh button) to recompute. Collection runs off the request thread and never touches
+    /// the render worker.
+    /// </summary>
+    [HttpGet("render-pc")]
+    public async Task<IActionResult> RenderPc([FromQuery] bool refresh, CancellationToken ct)
+        => Ok(await systemInfo.GetAsync(refresh, ct));
+
+    /// <summary>
+    /// One page of a console-log stream. The panel polls with its last-seen sequence; polling also
+    /// renews the stream's lease, which is what keeps the buffer alive while the panel is open.
+    /// </summary>
+    [HttpGet("logs")]
+    public IActionResult Logs([FromQuery] string? source, [FromQuery] long after = 0)
+    {
+        if (!LogStreamService.TryParseSource(source, out LogSource parsed))
+            return BadRequest(new ErrorResponse("invalid_source", "source must be service or engine."));
+
+        if (after < 0)
+            after = 0;
+
+        return Ok(logStream.Poll(parsed, after));
+    }
+
+    /// <summary>
+    /// Stops watching a stream and empties it. Called when the Console logs panel closes; omitting
+    /// <paramref name="source"/> closes both streams.
+    /// </summary>
+    [HttpPost("logs/close")]
+    public IActionResult CloseLogs([FromQuery] string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            logStream.ReleaseAll();
+            return NoContent();
+        }
+
+        if (!LogStreamService.TryParseSource(source, out LogSource parsed))
+            return BadRequest(new ErrorResponse("invalid_source", "source must be service or engine."));
+
+        logStream.Release(parsed);
+        return NoContent();
     }
 
     [HttpPost("purge")]

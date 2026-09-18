@@ -11,6 +11,9 @@ const state = {
   listTimer: null,
   adminTimer: null,
   queueMessageJobId: null,
+  logsTimer: null,
+  logsSource: null,
+  logsLastSequence: 0,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -109,7 +112,7 @@ async function loadMe() {
   if (me.role === "admin") { $("admin-tab").hidden = false; initAdmin(); }
 
   // Non-critical data must never mask a successful authentication.
-  await Promise.allSettled([loadCapabilities(), loadSkins(), loadPresets(), loadDefaults(), loadJobs()]);
+  await Promise.allSettled([loadSkins(), loadPresets(), loadDefaults(), loadJobs()]);
   startTimers();
 }
 
@@ -120,15 +123,46 @@ function switchTab(name) {
   if (panel) panel.hidden = false;
   if (name !== "render") clearQueueMessage();
   if (name !== "jobs") collapseAllJobs();
+  // Log lines are retained only while the Console logs panel is open.
+  if (name !== "admin") closeLogs(true);
 }
 
-/* ---------- capabilities / defaults ---------- */
+/* ---------- render pc ---------- */
 
-async function loadCapabilities() {
+const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];
+
+function fmtBytes(bytes) {
+  if (bytes == null || !Number.isFinite(bytes)) return "—";
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < BYTE_UNITS.length - 1) { value /= 1024; unit++; }
+  return `${value.toFixed(unit === 0 || value >= 10 ? 0 : 1)} ${BYTE_UNITS[unit]}`;
+}
+
+async function loadRenderPc(refresh = false) {
+  const target = $("render-pc");
+  if (!target) return;
+  target.innerHTML = "<dd>Collecting…</dd>";
   try {
-    const caps = await api("/api/v1/capabilities");
-    $("encoder-info").textContent = `Encoder: ${caps.encoder.toUpperCase()}${caps.autoDetected ? " (auto-detected)" : ""}`;
-  } catch { $("encoder-info").textContent = ""; }
+    const pc = await api(`/api/v1/admin/render-pc${refresh ? "?refresh=true" : ""}`);
+    const gpu = pc.gpu
+      ? `${esc(pc.gpu)}${pc.gpuDriver ? ` · driver ${esc(pc.gpuDriver)}` : ""}`
+      : "—";
+    const rows = [
+      ["CPU", `${esc(pc.cpuModel)} (${pc.cpuCores} cores)`],
+      ["Memory", fmtBytes(pc.memoryTotalBytes)],
+      ["GPU", gpu],
+      ["FFmpeg", pc.ffmpegVersion ? esc(pc.ffmpegVersion) : "not found"],
+      ["Encoder", `${esc(String(pc.encoder).toUpperCase())}${pc.encoderAutoDetected ? " (auto-detected)" : " (configured)"}`],
+      ["Runtime", esc(pc.dotnetRuntime)],
+      ["OS", esc(pc.operatingSystem)],
+      ["Results volume", `${fmtBytes(pc.resultsFreeBytes)} free of ${fmtBytes(pc.resultsTotalBytes)} — ${esc(pc.resultsPath)}`],
+      ["Collected", new Date(pc.collectedAt).toLocaleString()],
+    ];
+    target.innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
+  } catch (err) {
+    target.innerHTML = `<dd>Render PC summary unavailable: ${esc(err.message)}</dd>`;
+  }
 }
 
 async function loadDefaults() {
@@ -825,7 +859,12 @@ async function cancelJob(id) {
 
 async function initAdmin() {
   document.querySelectorAll("[data-purge]").forEach((b) => b.addEventListener("click", () => purge(b.dataset.purge)));
+  document.querySelectorAll("[data-log-source]").forEach((b) =>
+    b.addEventListener("click", () => openLogs(b.dataset.logSource)));
+  $("logs-close")?.addEventListener("click", () => closeLogs());
+  $("render-pc-refresh")?.addEventListener("click", () => loadRenderPc(true));
   await refreshAdmin();
+  await loadRenderPc();
 }
 
 async function refreshAdmin() {
@@ -888,6 +927,111 @@ async function purge(target) {
   } catch (err) { alert(err.message); }
 }
 
+/* ---------- console logs ---------- */
+
+// Keeps the accumulated DOM lines bounded; the server buffer is bounded too.
+const LOG_MAX_LINES = 500;
+
+function logLineClass(severity) {
+  switch (severity) {
+    case "warning": return "warn";
+    case "error": return "error";
+    case "debug": return "debug";
+    default: return "info";
+  }
+}
+
+function formatLogRecord(record) {
+  const time = new Date(record.timestamp).toLocaleTimeString();
+  return `${time}  ${String(record.severity).toUpperCase().padEnd(5)}  ${record.message}`;
+}
+
+function appendLogRecords(records) {
+  const view = $("logs-view");
+  if (!view || !records.length) return;
+
+  const fragment = document.createDocumentFragment();
+  records.forEach((record) => {
+    const line = document.createElement("span");
+    line.className = `log-line ${logLineClass(record.severity)}`;
+    line.textContent = `${formatLogRecord(record)}\n`;
+    fragment.appendChild(line);
+  });
+  view.appendChild(fragment);
+
+  while (view.childNodes.length > LOG_MAX_LINES) view.removeChild(view.firstChild);
+  if ($("logs-follow").checked) view.scrollTop = view.scrollHeight;
+}
+
+function stopLogPolling() {
+  if (state.logsTimer) { clearInterval(state.logsTimer); state.logsTimer = null; }
+}
+
+function syncLogButtons() {
+  document.querySelectorAll("[data-log-source]").forEach((b) =>
+    b.classList.toggle("primary", b.dataset.logSource === state.logsSource));
+}
+
+async function pollLogs() {
+  const source = state.logsSource;
+  if (!source) return;
+
+  const snapshot = await api(`/api/v1/admin/logs?source=${encodeURIComponent(source)}&after=${state.logsLastSequence}`);
+  if (state.logsSource !== source) return; // the panel switched while this request was in flight
+
+  if (snapshot.cleared) {
+    // Our cursor is older than anything retained; drop what we have and resync.
+    state.logsLastSequence = 0;
+    $("logs-view").textContent = "";
+  }
+
+  appendLogRecords(snapshot.records);
+
+  if (snapshot.records.length) {
+    state.logsLastSequence = snapshot.records[snapshot.records.length - 1].sequence;
+  }
+
+  $("logs-meta").textContent =
+    `${source} · buffer ${snapshot.capacity} lines · ${snapshot.dropped} dropped · level ${snapshot.minimumSeverity}`;
+}
+
+async function openLogs(source) {
+  if (!source || state.logsSource === source) return;
+
+  await closeLogs(true);
+
+  state.logsSource = source;
+  state.logsLastSequence = 0;
+  $("logs-view").textContent = "";
+  $("logs-follow").checked = true;
+  $("logs-meta").textContent = `Watching ${source}…`;
+  syncLogButtons();
+
+  try { await pollLogs(); } catch { /* transient; the next tick retries */ }
+  state.logsTimer = setInterval(() => { pollLogs().catch(() => {}); }, 1000);
+}
+
+// Releases the current stream server-side (which empties its buffer) and stops polling. Safe to call
+// when nothing is open. `silent` skips the UI reset so openLogs can switch streams.
+async function closeLogs(silent = false) {
+  stopLogPolling();
+  const source = state.logsSource;
+  state.logsSource = null;
+  state.logsLastSequence = 0;
+  syncLogButtons();
+
+  if (source) {
+    try {
+      await api(`/api/v1/admin/logs/close?source=${encodeURIComponent(source)}`, { method: "POST" });
+    } catch { /* the idle sweeper clears it once the lease expires */ }
+  }
+
+  if (!silent) {
+    if ($("logs-view")) $("logs-view").textContent = "";
+    if ($("logs-meta")) $("logs-meta").textContent = "Closed.";
+  }
+}
+
 /* ---------- timers ---------- */
 
 function startTimers() {
@@ -901,6 +1045,7 @@ function startTimers() {
 function stopTimers() {
   [state.listTimer, state.adminTimer].forEach((t) => { if (t) clearInterval(t); });
   state.listTimer = state.adminTimer = null;
+  stopLogPolling();
 }
 
 /* ---------- wiring ---------- */
