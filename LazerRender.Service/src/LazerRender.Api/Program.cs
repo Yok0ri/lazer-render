@@ -47,17 +47,24 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     // The framework ships its own defaults (loopback plus a private range). Clear them and trust
     // exactly what the operator configured.
     options.KnownProxies.Clear();
-    options.KnownNetworks.Clear();
+    options.KnownIPNetworks.Clear();
 
     foreach (System.Net.IPAddress proxy in trust.Proxies)
         options.KnownProxies.Add(proxy);
 
     foreach (ProxyConfiguration.NetworkPrefix network in trust.Networks)
     {
-        options.KnownNetworks.Add(
-            new Microsoft.AspNetCore.HttpOverrides.IPNetwork(network.Prefix, network.PrefixLength));
+        options.KnownIPNetworks.Add(
+            new System.Net.IPNetwork(network.Prefix, network.PrefixLength));
     }
 });
+
+// The app itself never binds an HTTPS endpoint (the public proxy terminates TLS), so the redirect
+// middleware cannot infer a port and logs "Failed to determine the https port" whenever it needs to
+// redirect. Give it the public one; it only takes effect outside Development (see below), so a local
+// http://localhost run is unaffected.
+builder.Services.AddHttpsRedirection(options =>
+    options.HttpsPort = builder.Configuration.GetValue("HttpsRedirection:HttpsPort", 443));
 
 // --- JSON serialization ---
 builder.Services
@@ -118,7 +125,7 @@ if (keyRingEncrypted)
 
     // A PEM pair (cert + key) or a single PFX/PKCS#12 file.
     var certificate = string.IsNullOrWhiteSpace(certificateKeyPath)
-        ? new System.Security.Cryptography.X509Certificates.X509Certificate2(certificatePath!, certificatePassword)
+        ? System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12FromFile(certificatePath!, certificatePassword)
         : System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(certificatePath!, certificateKeyPath);
 
     dataProtection.ProtectKeysWithCertificate(certificate);
@@ -369,6 +376,10 @@ if (!app.Environment.IsDevelopment())
     // HSTS only makes sense once the app knows it is behind TLS (see the forwarded-headers setup above)
     // and only in production, so a local http run is never pinned to HTTPS by its own browser.
     app.UseHsts();
+
+    // HTTPS redirection is likewise a production concern: the app only ever speaks plain HTTP behind
+    // the proxy, and a local http://localhost run must stay usable.
+    app.UseHttpsRedirection();
 }
 
 // Security headers on every response, including redirects and errors.
@@ -382,7 +393,6 @@ app.Use(async (context, next) =>
 // the rate limiter and the cookie policy all depend on it. A request from an address that is not a
 // configured proxy keeps its real socket address and plain HTTP scheme.
 app.UseForwardedHeaders();
-app.UseHttpsRedirection();
 app.UseRateLimiter();
 app.UseDefaultFiles();
 app.UseStaticFiles();
