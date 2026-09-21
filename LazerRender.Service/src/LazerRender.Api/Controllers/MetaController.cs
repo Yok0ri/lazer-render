@@ -23,7 +23,7 @@ public sealed class MetaController : ControllerBase
         var encoder = encoderResolver.Resolve();
         return Ok(new
         {
-            encoder = encoder.ToString().ToLowerInvariant(),
+            encoder = encoder.Display(),
             autoDetected = encoderResolver.IsAuto,
         });
     }

@@ -18,7 +18,7 @@ public static class JobMapper
         j.PlayerUsername,
         j.ReplayMd5,
         j.SkinName,
-        j.Encoder.ToString().ToLowerInvariant(),
+        j.Encoder.Display(),
         j.Width,
         j.Height,
         j.Fps,

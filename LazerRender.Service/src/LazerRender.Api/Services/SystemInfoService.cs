@@ -112,7 +112,7 @@ public sealed class SystemInfoService
         try
         {
             return new EncoderKindLike(
-                encoderResolver.Resolve().ToString().ToLowerInvariant(),
+                encoderResolver.Resolve().Display(),
                 encoderResolver.IsAuto);
         }
         catch (Exception e)

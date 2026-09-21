@@ -158,9 +158,9 @@ public sealed class EncoderResolver
 
     private static EncoderKind Parse(string value) => value.ToLowerInvariant() switch
     {
-        "amd" => EncoderKind.Amd,
-        "nvidia" => EncoderKind.Nvidia,
-        "intel" => EncoderKind.Intel,
+        "amd" or "vaapi" => EncoderKind.Amd,
+        "nvidia" or "nvenc" => EncoderKind.Nvidia,
+        "intel" or "qsv" => EncoderKind.Intel,
         _ => EncoderKind.Cpu,
     };
 }
