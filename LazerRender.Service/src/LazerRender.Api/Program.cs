@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
@@ -162,7 +163,11 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 
         // Belt-and-braces for the absolute lifetime: even if sliding expiration is ever re-enabled, a
         // session older than the limit is rejected rather than reissued.
-        options.Events.OnValidatePrincipal = context =>
+        //
+        // Access is an allowlist and the role is authoritative in the database, so both are re-checked on
+        // every authenticated request: revoking a user (or an admin) must take effect immediately, not
+        // whenever the cookie happens to expire. This costs one indexed lookup per authenticated request.
+        options.Events.OnValidatePrincipal = async context =>
         {
             string? authTime = context.Principal?.FindFirst("auth_time")?.Value;
 
@@ -171,9 +176,33 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
                 && DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(issuedUnix) > absoluteSessionLifetime)
             {
                 context.RejectPrincipal();
+                return;
             }
 
-            return Task.CompletedTask;
+            string? userId = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (userId is null)
+            {
+                context.RejectPrincipal();
+                return;
+            }
+
+            var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+            var current = await db.Users
+                .AsNoTracking()
+                .Where(u => u.Id == userId)
+                .Select(u => new { u.IsAllowed, u.Role })
+                .SingleOrDefaultAsync(context.HttpContext.RequestAborted);
+
+            if (current is null || !current.IsAllowed)
+            {
+                context.RejectPrincipal();
+                return;
+            }
+
+            // A role change invalidates the claims carried by the cookie; force a fresh sign-in rather
+            // than keep trusting a stale `admin` claim.
+            if (!string.Equals(current.Role, context.Principal?.FindFirst(ClaimTypes.Role)?.Value, StringComparison.Ordinal))
+                context.RejectPrincipal();
         };
     });
 builder.Services.AddAuthorization();
