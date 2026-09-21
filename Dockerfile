@@ -42,6 +42,9 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 #                   ffmpeg's h264_vaapi and the service's encoder probe load. The GL packages above do
 #                   NOT include them, so without this the probe fails and every render falls back to
 #                   libx264 (the service reports "Encoder: CPU (auto-detected)").
+# Intel VA-API/QSV — Mesa's VA state trackers do NOT cover Intel; the iHD driver (iHD_drv_video.so)
+#                   comes from intel-media-va-driver-non-free (multiverse) and backs both h264_vaapi
+#                   and h264_qsv on Gen9+ iGPUs.
 # curl            — container healthcheck against /health.
 #
 # .NET 10's Linux images are Ubuntu 24.04 (noble), not Debian bookworm. That changes two things from
@@ -70,6 +73,7 @@ RUN apt-get update \
       libgbm1 \
       mesa-vulkan-drivers \
       mesa-va-drivers \
+      intel-media-va-driver-non-free \
  && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --uid 10001 --create-home --shell /usr/sbin/nologin lazerrender

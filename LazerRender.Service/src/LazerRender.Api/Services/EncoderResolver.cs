@@ -140,9 +140,10 @@ public sealed class EncoderResolver
                 return true;
 
             // The probe output is a few lines (ffmpeg runs at -loglevel error), so reading it after exit
-            // cannot block; surfacing it is what makes a silent CPU fallback diagnosable.
+            // cannot block. Logged at Information (not Debug) so a CPU fallback is diagnosable with
+            // default log levels — the reason a GPU backend was skipped is otherwise invisible.
             string error = process.StandardError.ReadToEnd().Trim();
-            logger.LogDebug(
+            logger.LogInformation(
                 "Encoder probe {Kind} failed with exit code {ExitCode}: {Error}",
                 kind, process.ExitCode, error);
 
