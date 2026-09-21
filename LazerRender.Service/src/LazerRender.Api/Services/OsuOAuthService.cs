@@ -105,6 +105,24 @@ public sealed class OsuOAuthService
         return await PostTokenAsync(content, ct);
     }
 
+    /// <summary>
+    /// Mints an app-level (client-credentials) token from the configured OAuth client. It can read
+    /// public endpoints such as <c>GET /users/{username}</c>, so username lookup and avatars do not
+    /// need a separate API key when OAuth is already configured.
+    /// </summary>
+    public async Task<OsuTokenResponse> GetClientCredentialsTokenAsync(CancellationToken ct)
+    {
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = options.ClientId,
+            ["client_secret"] = options.ClientSecret,
+            ["scope"] = "public",
+        });
+
+        return await PostTokenAsync(content, ct);
+    }
+
     public async Task<OsuUserResponse> GetPublicUserAsync(string username, string bearerToken, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(

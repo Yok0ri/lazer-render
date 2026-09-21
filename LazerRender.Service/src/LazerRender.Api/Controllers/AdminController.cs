@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
 
 namespace LazerRender.Api.Controllers;
 
@@ -143,14 +144,28 @@ public sealed class AdminController : ControllerBase
         }
         else if (!string.IsNullOrWhiteSpace(request.Username))
         {
-            var token = string.IsNullOrWhiteSpace(rendererOptions.AvatarApiKey)
+            string? token = string.IsNullOrWhiteSpace(rendererOptions.AvatarApiKey)
                 ? Environment.GetEnvironmentVariable("OSU_API_KEY")
                 : rendererOptions.AvatarApiKey;
+
+            // An instance with OAuth configured can mint an app token for the public user endpoint, so
+            // username lookup does not need a separate API key.
+            if (string.IsNullOrWhiteSpace(token) && osu.IsConfigured)
+            {
+                try
+                {
+                    token = (await osu.GetClientCredentialsTokenAsync(ct)).AccessToken;
+                }
+                catch (Exception e)
+                {
+                    logger.LogWarning(e, "Could not obtain an osu! app token to resolve \"{Username}\".", request.Username);
+                }
+            }
 
             if (string.IsNullOrWhiteSpace(token))
                 return BadRequest(new ErrorResponse(
                     "api_key_required",
-                    "Set Renderer:AvatarApiKey (or OSU_API_KEY) to resolve users by username."));
+                    "Cannot resolve usernames: configure Osu:OAuth (or Renderer:AvatarApiKey), or allow by user ID."));
 
             OsuUserResponse resolved;
             try
@@ -203,6 +218,12 @@ public sealed class AdminController : ControllerBase
         var user = await db.Users.SingleOrDefaultAsync(u => u.OsuUserId == request.OsuUserId, ct);
         if (user is null)
             return NotFound(new ErrorResponse("not_found"));
+
+        // An admin cannot revoke themselves: it is the instance's guaranteed way back in, and their
+        // current session would keep admin access anyway (IsAllowed is only enforced at sign-in).
+        string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (currentUserId is not null && string.Equals(user.Id, currentUserId, StringComparison.Ordinal))
+            return BadRequest(new ErrorResponse("cannot_revoke_self", "You cannot revoke your own access."));
 
         user.IsAllowed = false;
         await db.SaveChangesAsync(ct);

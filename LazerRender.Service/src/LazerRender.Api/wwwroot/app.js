@@ -877,16 +877,23 @@ async function refreshAdmin() {
 
 async function loadUsers() {
   const users = await api("/api/v1/admin/users");
-  const rows = users.map((u) => `
+  const selfId = state.me ? String(state.me.osuUserId) : "";
+  const rows = users.map((u) => {
+    const action = String(u.osuUserId) === selfId
+      ? '<span class="muted" title="You cannot revoke your own access">you</span>'
+      : u.isAllowed
+        ? `<button class="btn" type="button" data-revoke="${esc(u.osuUserId)}">Revoke</button>`
+        : `<button class="btn primary" type="button" data-allow-id="${esc(u.osuUserId)}">Allow</button>`;
+
+    return `
     <tr>
       <td data-label="osu! ID">${esc(u.osuUserId)}</td>
       <td data-label="Username">${esc(u.username)}</td>
       <td data-label="Role">${esc(u.role)}</td>
       <td data-label="Access">${u.isAllowed ? '<span class="badge completed">allowed</span>' : '<span class="badge failed">blocked</span>'}</td>
-      <td data-label="Action">${u.isAllowed
-        ? `<button class="btn" type="button" data-revoke="${esc(u.osuUserId)}">Revoke</button>`
-        : `<button class="btn primary" type="button" data-allow-id="${esc(u.osuUserId)}">Allow</button>`}</td>
-    </tr>`).join("");
+      <td data-label="Action">${action}</td>
+    </tr>`;
+  }).join("");
 
   $("users-list").innerHTML = users.length
     ? `<table><thead><tr><th>osu! ID</th><th>Username</th><th>Role</th><th>Access</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
