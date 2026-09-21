@@ -880,7 +880,7 @@ async function loadUsers() {
   const selfId = state.me ? String(state.me.osuUserId) : "";
   const rows = users.map((u) => {
     const action = String(u.osuUserId) === selfId
-      ? '<span class="muted" title="You cannot revoke your own access">you</span>'
+      ? ""
       : u.isAllowed
         ? `<button class="btn" type="button" data-revoke="${esc(u.osuUserId)}">Revoke</button>`
         : `<button class="btn primary" type="button" data-allow-id="${esc(u.osuUserId)}">Allow</button>`;

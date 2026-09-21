@@ -432,7 +432,15 @@ app.Use(async (context, next) =>
 app.UseForwardedHeaders();
 app.UseRateLimiter();
 app.UseDefaultFiles();
-app.UseStaticFiles();
+// The SPA ships un-fingerprinted assets (app.js, styles.css) that change every release. With no
+// Cache-Control the browser caches them heuristically and a CDN in front (e.g. Cloudflare) caches
+// static extensions at the edge, so an upgrade can keep serving stale JavaScript until the cache is
+// cleared by hand. `no-cache` means "store, but revalidate": the browser/edge get a cheap 304 and pick
+// up changes on the next reload.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "no-cache",
+});
 app.UseAuthentication();
 app.UseAuthorization();
 
