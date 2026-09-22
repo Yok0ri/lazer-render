@@ -198,7 +198,7 @@ Status at a glance:
 | 6 | Render & web UX refinements | ✅ done |
 | 7 | Security audit & hardening | ✅ done |
 | 8 | Docker, observability & release | ✅ done |
-| 9 | New features (browser replay viewer, strain graph) | ⬜ planned |
+| 9 | New features (browser replay viewer, strain graph, Discord bot) | ⬜ planned |
 
 Recent Phase 8 work: a single container image + compose stack, an in-memory logging/instrumentation core,
 an admin observability panel, a maintenance runbook, and a **.NET 10 rebase** of the pinned osu! engine
