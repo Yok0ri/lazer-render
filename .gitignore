@@ -1,4 +1,38 @@
-# Build
+# ============================================================================
+# Ship-list mode: this file lists what IS published, not what is ignored.
+#
+# Everything is ignored by default (the "/*" below) and the shipped paths are
+# re-included with "!". The private working docs, local notes and design assets
+# are therefore never named here — the file only reveals what the repository
+# publishes.
+#
+# Consequence: a NEW top-level file or directory is ignored until it is added to
+# the allow-list below. If something you just created does not show up in
+# "git status", that is why.
+# ============================================================================
+
+# Ignore everything at the top level, unless re-included below.
+/*
+
+# --- Shipped: top level -----------------------------------------------------
+!/.dockerignore
+!/.gitattributes
+!/.github/
+!/.gitignore
+!/.gitmodules
+!/Directory.Build.props
+!/Dockerfile
+!/LICENSE
+!/LazerRender.sln
+!/README.md
+!/docker-compose.yml
+!/LazerRender.Game/
+!/LazerRender.Service/
+
+# --- NOT shipped ------------------------------------------------------------
+# Listed after the negations above, so these win inside the shipped trees too.
+
+# Build output
 [Bb]in/
 [Oo]bj/
 [Oo]ut/
@@ -42,22 +76,8 @@ captures/
 *.local.json
 .env
 
-# Private working notes (AI advice, progress reports, task prompts).
-dev/
-
-# Private working docs — kept locally, never published. Only README.md and
-# LazerRender.Game/WEB_GUI_GUIDE.md ship with the repository.
-/ARCHITECTURE.md
-/MAINTENANCE.md
-/ROADMAP.md
-/SECURITY.md
-/LazerRender.Service/DEPLOYMENT.md
-/LazerRender.Service/DESIGN_PLAN.md
-
-# LazerRender runtime data (web service storage + engine realm/ini/db)
-# Never commit these: they hold the SQLite DB, the Data Protection key ring,
-# lazer's Realm database and its config (which can transiently hold the
-# injected osu! token).
+# Runtime data and generated trees (SQLite DB, uploads/jobs/results, the Data
+# Protection key ring, lazer's Realm storage, publishes). Never committed.
 data/
 keys/
 uploads/
@@ -66,7 +86,7 @@ results/
 publish/
 storage/
 
-# Private replay fixtures used for local testing — never shipped.
+# Private replay fixtures used for local testing.
 LazerRender.Game/tests/
 *.osr
 
@@ -74,3 +94,15 @@ LazerRender.Game/tests/
 out*/
 frames/
 test_output/
+
+# Private working notes and design assets. Root-anchored so a shipped "assets"
+# directory elsewhere (the SPA's wwwroot/assets) is unaffected.
+/dev/
+/assets/
+
+# Documentation: only the two published files. Everything else — the private
+# planning/maintenance docs and any future working notes — is covered here
+# without ever being named.
+*.md
+!README.md
+!LazerRender.Game/WEB_GUI_GUIDE.md
