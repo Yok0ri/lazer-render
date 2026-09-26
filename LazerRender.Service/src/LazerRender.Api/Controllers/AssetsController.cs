@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using LazerRender.Api.Data;
 using LazerRender.Api.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -52,12 +53,31 @@ public sealed class AssetsController : ControllerBase
             return BadRequest(new { error = "file_too_large", detail = "Skin exceeds the 200 MB limit." });
 
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        var tempPath = Path.Combine(storage.UploadsDirectory, $"{Guid.NewGuid():N}.osk");
+
+        // The engine's legacy-skin importer derives the skin's display name from the archive file
+        // name (an .osk without a skin.ini is named after its archive). Stage the upload under the
+        // user's original filename — inside a unique per-upload directory so the name stays unique —
+        // otherwise the engine stores a GUID name, and a render asking for the name shown in the UI
+        // never matches it and silently falls back to the default skin.
+        string originalName = Path.GetFileName(file.FileName);
+        string skinName = Path.GetFileNameWithoutExtension(originalName);
+
+        if (string.IsNullOrWhiteSpace(skinName))
+            skinName = Guid.NewGuid().ToString("N");
+
+        if (string.IsNullOrWhiteSpace(originalName) || !originalName.EndsWith(".osk", StringComparison.OrdinalIgnoreCase))
+            originalName = $"{Guid.NewGuid():N}.osk";
+
+        var uploadDirectory = Path.Combine(storage.UploadsDirectory, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(uploadDirectory);
+        var tempPath = Path.Combine(uploadDirectory, originalName);
 
         await using (var target = System.IO.File.Create(tempPath))
         {
             await file.OpenReadStream().CopyToAsync(target, ct);
         }
+
+        string storedName = skinName;
 
         try
         {
@@ -67,7 +87,11 @@ public sealed class AssetsController : ControllerBase
             if (archiveError is not null)
                 return BadRequest(new { error = "invalid_archive", detail = archiveError });
 
-            await importer.RunAsync(new[] { "--import-skin", tempPath, "--storage", storage.RealmDirectory }, ct);
+            string stdout = await importer.RunAsync(new[] { "--import-skin", tempPath, "--storage", storage.RealmDirectory }, ct);
+
+            // Persist the name the engine actually stored (the skin.ini Name, which can differ from
+            // the archive/file name) so a later render request by the name shown in the UI matches it.
+            storedName = ParseSkinName(stdout) ?? skinName;
         }
         catch (AssetImportBusyException)
         {
@@ -75,18 +99,48 @@ public sealed class AssetsController : ControllerBase
         }
         finally
         {
-            if (System.IO.File.Exists(tempPath))
-                System.IO.File.Delete(tempPath);
+            if (Directory.Exists(uploadDirectory))
+                Directory.Delete(uploadDirectory, recursive: true);
         }
 
         db.Skins.Add(new SkinEntity
         {
-            Name = Path.GetFileNameWithoutExtension(file.FileName),
+            Name = storedName,
             UploadedBy = userId,
         });
         await db.SaveChangesAsync(ct);
 
-        return Ok(new { imported = true, name = Path.GetFileNameWithoutExtension(file.FileName) });
+        return Ok(new { imported = true, name = storedName });
+    }
+
+    /// <summary>
+    /// Extracts the arbitrary skin name the engine stored from an <c>--import-skin</c> stdout. The
+    /// engine emits it as a machine-readable <c>{"type":"import","kind":"skin",...}</c> line.
+    /// Returns <c>null</c> when the line is absent (the caller falls back to the upload's filename).
+    /// </summary>
+    private static string? ParseSkinName(string stdout)
+    {
+        foreach (string line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!line.StartsWith('{'))
+                continue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+
+                if (root.TryGetProperty("type", out var type) && type.GetString() == "import"
+                    && root.TryGetProperty("name", out var name) && name.GetString() is { Length: > 0 } parsed)
+                    return parsed;
+            }
+            catch (JsonException)
+            {
+                // Ignore non-JSON / malformed lines.
+            }
+        }
+
+        return null;
     }
 
     [HttpGet("skins")]

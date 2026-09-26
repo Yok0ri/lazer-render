@@ -102,14 +102,15 @@ Run the engine with `--help` for the exact flag names. In short:
 - **Content:** `--skin`, `--duration`, `--storyboard`/`--no-storyboard`, `--video`/`--no-video`,
   `--beatmap-skins`, `--beatmap-colours`, `--beatmap-hitsounds`, `--dim-level`, `--blur-level`,
   `--parallax`, `--combo-colour-normalisation`.
-- **Gameplay:** `--snaking-in`, `--snaking-out`, `--hit-animations`, `--hit-lighting`, `--cursor-trail`,
-  `--cursor-ripples`, `--cursor-size`, `--playfield-border`.
+- **Gameplay:** `--snaking-in`, `--snaking-out`, `--hit-animations`, `--hit-lighting`, `--star-fountains`,
+  `--cursor-trail`, `--cursor-ripples`, `--cursor-size`, `--playfield-border`.
 - **Replay analysis:** `--show-click-markers`, `--show-frame-markers`, `--show-cursor-path`,
   `--hide-gameplay-cursor`, `--replay-analysis-length`.
 - **HUD:** `--hud-visibility <never|hiddengameplay|always>`, `--hud-scale`, `--hud <keys...>`
   (`hp, combo, score, keyoverlay, accuracy, pp, hiterror, song-progress, unstable-rate, judgements, mods,
   aim-error, rank, longest-combo, scoreboard, bpm, cps, player-name, avatar, flags, spectators, cosmetic`).
-- **Results:** `--disable-result-screen`, `--leaderboard-scope <global|country|friend|team>`.
+- **Results:** `--disable-result-screen`, `--skip-intro` (skip the intro and start at the first object;
+  off by default so the intro plays like the music), `--leaderboard-scope <global|country|friend|team>`.
 - **Credentials (optional):** `--secrets-file`, `--avatar-api-key`, `--osu-user-token`.
 
 `--render-config <path|->` takes the same settings as one JSON document (used by the service). The full

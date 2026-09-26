@@ -151,6 +151,14 @@ namespace LazerRender
         public bool DisableResultScreen { get; set; }
 
         /// <summary>
+        /// When true, the recorder fast-forwards past the beatmap's intro and starts the recording as
+        /// close to the first object as possible (the classic replay-viewer behaviour). When false
+        /// (the default), the recording starts at the beatmap's own start time, so the intro fragment
+        /// before the first object is played exactly as the audio track's opening plays it.
+        /// </summary>
+        public bool SkipIntro { get; set; }
+
+        /// <summary>
         /// Which beatmap leaderboard to warm for the scoreboard (<c>--leaderboard-scope</c>, JSON
         /// <c>leaderboardScope</c>). One of <see cref="LeaderboardScopes.All"/>; defaults to
         /// <c>global</c>. Only meaningful when a user token signs the engine in.

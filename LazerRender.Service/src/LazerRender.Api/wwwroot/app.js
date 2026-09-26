@@ -298,7 +298,7 @@ const BOOL_KEYS = [
   "storyboard", "video", "beatmap-skins", "beatmap-colours", "beatmap-hitsounds",
   "snaking-in", "snaking-out", "hit-animations", "hit-lighting", "cursor-trail", "cursor-ripples",
   "hide-gameplay-cursor", "show-click-markers", "show-frame-markers", "show-cursor-path",
-  "disable-result-screen",
+  "disable-result-screen", "skip-intro", "star-fountains",
 ];
 
 // HUD component keys accepted by the engine's --hud (must mirror HudVisibilityFilter.AllKeys).

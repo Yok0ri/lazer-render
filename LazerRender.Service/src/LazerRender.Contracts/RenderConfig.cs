@@ -32,6 +32,7 @@ public sealed class RenderConfig
     public bool SnakingOut { get; set; } = true;
     public bool HitAnimations { get; set; } = true;
     public bool HitLighting { get; set; }
+    public bool StarFountains { get; set; }
     public bool CursorTrail { get; set; } = true;
     public bool CursorRipples { get; set; }
     public double CursorSize { get; set; } = 1.0;
@@ -50,6 +51,13 @@ public sealed class RenderConfig
     /// transitioning to the results screen.
     /// </summary>
     public bool DisableResultScreen { get; set; }
+
+    /// <summary>
+    /// When true, the recorder skips the beatmap's intro and starts as close to the first object as
+    /// possible. When false (the default), the recording includes the intro fragment before the
+    /// first object, matching how the audio track starts.
+    /// </summary>
+    public bool SkipIntro { get; set; }
 
     /// <summary>
     /// Which beatmap leaderboard the recorder warms for the scoreboard: <c>global</c> (default),

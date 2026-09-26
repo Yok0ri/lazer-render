@@ -236,7 +236,7 @@ public sealed class RenderWorker : BackgroundService
             // Preparation: estimate the output size and reject jobs that would exceed the disk
             // budget before launching the render process. Best-effort — if --replay-info fails
             // (e.g. transient engine error) the job proceeds normally.
-            string? sizeError = await CheckSizeLimitAsync(job, storage, jobCts.Token);
+            string? sizeError = await CheckSizeLimitAsync(db, job, storage, jobCts.Token);
             if (sizeError is not null)
             {
                 await MarkRejectedAsync(db, storage, job, sizeError);
@@ -375,7 +375,7 @@ public sealed class RenderWorker : BackgroundService
         });
     }
 
-    private async Task<string?> CheckSizeLimitAsync(JobEntity job, StorageService storage, CancellationToken ct)
+    private async Task<string?> CheckSizeLimitAsync(AppDbContext db, JobEntity job, StorageService storage, CancellationToken ct)
     {
         try
         {
@@ -404,6 +404,12 @@ public sealed class RenderWorker : BackgroundService
 
             if (job.MapStars is null && info.Stars > 0)
                 job.MapStars = info.Stars;
+
+            // The --replay-info call above has just ensured the beatmap is imported, so this is the
+            // earliest point at which the job can show its real title. Apply it here rather than only
+            // after the render: a queued job whose queue-time lookup lost the shared render lock used
+            // to read "Replay by <player>" for its whole render duration.
+            await ApplyAndCacheMapMetadataAsync(db, job, info);
 
             long estimate = sizeEstimator.EstimateBytes(job.Width, job.Height, job.Fps, info.DurationSeconds);
             long limit = sizeEstimator.LimitBytes;
@@ -440,6 +446,42 @@ public sealed class RenderWorker : BackgroundService
 
         storage.DeleteStagedReplay(job.Id);
         storage.DeleteJobDirectory(job.Id);
+    }
+
+    private static async Task ApplyAndCacheMapMetadataAsync(AppDbContext db, JobEntity job, ReplayRenderInfo info)
+    {
+        if (string.IsNullOrWhiteSpace(info.Title))
+            return;
+
+        if (string.IsNullOrEmpty(job.MapTitle))
+        {
+            job.MapTitle = info.Title;
+            job.MapArtist = info.Artist ?? string.Empty;
+            job.MapCreator = info.Creator ?? string.Empty;
+            job.MapVersion = info.Version ?? string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(job.ReplayMd5))
+            return;
+
+        // Seed the beatmap cache so the queue-time lookup for later jobs of the same map resolves
+        // immediately instead of waiting on (and losing to) the render lock.
+        var row = await db.BeatmapCache.SingleOrDefaultAsync(b => b.Md5 == job.ReplayMd5);
+        if (row is null)
+        {
+            row = new BeatmapCacheEntity { Md5 = job.ReplayMd5 };
+            db.BeatmapCache.Add(row);
+        }
+
+        row.Imported = true;
+        row.DownloadedAt ??= DateTimeOffset.UtcNow;
+        row.Title = info.Title;
+        row.Artist = info.Artist ?? string.Empty;
+        row.Creator = info.Creator ?? string.Empty;
+        row.Version = info.Version ?? string.Empty;
+
+        if (info.Stars > 0)
+            row.Stars = info.Stars;
     }
 
     private static string FormatBytes(long bytes)

@@ -1,6 +1,7 @@
 // Copyright (c) LazerRender contributors. Licensed under the MIT Licence.
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -51,6 +52,13 @@ namespace LazerRender
         private const double resultsFadeSeconds = 1.5;
 
         /// <summary>
+        /// How long after load to keep re-applying the HUD whitelist while the skin's components load
+        /// and the HUD fades in (lazer fades the HUD over 300 ms). After this the filter has settled and
+        /// the per-frame pass stops.
+        /// </summary>
+        private const int hudSettleMilliseconds = 3000;
+
+        /// <summary>
         /// Duration of the fade-to-black recorded when the results screen is disabled. Deliberately
         /// 1.5× faster than the results-tail fade, i.e. the same 3.5s→5s style fade in ~1 second.
         /// </summary>
@@ -89,6 +97,12 @@ namespace LazerRender
         /// the results screen, which is a separate screen on top of the player).
         /// </summary>
         private Box? blackOverlay;
+
+        /// <summary>HUD containers already subscribed to <see cref="SkinnableContainer.OnComponentsLoaded"/>.</summary>
+        private readonly HashSet<SkinnableContainer> watchedHudContainers = new();
+
+        private readonly Stopwatch hudSettleStopwatch = new();
+        private bool hudSettling;
 
         private int? totalFrames => options.DurationSeconds.HasValue
             ? (int)Math.Ceiling(options.DurationSeconds.Value * options.Fps)
@@ -140,8 +154,19 @@ namespace LazerRender
         {
             base.OnEntering(e);
 
-            // Jump as close to the start of gameplay as possible.
-            PerformIntroSkip(true);
+            if (options.SkipIntro)
+            {
+                // Jump as close to the start of gameplay as possible, dropping the beatmap's intro.
+                PerformIntroSkip(true);
+            }
+            else
+            {
+                // Play the beatmap's intro (the fragment before the first object) exactly as the audio
+                // track does. Rewind the gameplay clock to the beatmap's own start time so the
+                // recording begins at the very beginning rather than wherever the player happened to
+                // have advanced to while the screen was loading.
+                GameplayClockContainer.Seek(GameplayClockContainer.StartTime);
+            }
 
             recordingStartTime = GameplayClockContainer.CurrentTime;
 
@@ -220,24 +245,55 @@ namespace LazerRender
             if (!options.HudSpecified)
                 return;
 
-            foreach (SkinnableContainer container in HudVisibilityFilter.FindHudComponentContainers(HUDOverlay))
-                container.OnComponentsLoaded += onHudComponentsLoaded;
+            watchHudContainers();
 
-            // Safety net: re-apply once the components have settled (a component may schedule its own
-            // fade-in while loading). Recording is already running, so this does not affect timing.
-            Scheduler.AddDelayed(applyHudVisibilityFilter, 1500);
+            // The skin's components load asynchronously and the HUD fades them in, so a single pass (or
+            // the old one-shot 1.5 s safety net) could leave unselected elements visible until it fired.
+            // Trim continuously across a short settle window instead: every frame we re-scan for newly
+            // created containers (subscribing to their load event) and re-apply the whitelist, so an
+            // unselected element is hidden in the frame it appears rather than after it has faded in.
+            hudSettleStopwatch.Restart();
+            hudSettling = true;
         }
 
-        private void onHudComponentsLoaded(Drawable _) => applyHudVisibilityFilter();
+        /// <summary>Subscribes to the component-loaded event of every HUD container currently found.</summary>
+        private void watchHudContainers()
+        {
+            foreach (SkinnableContainer container in HudVisibilityFilter.FindHudComponentContainers(HUDOverlay))
+            {
+                if (watchedHudContainers.Add(container))
+                    container.OnComponentsLoaded += onHudComponentsLoaded;
+            }
+        }
+
+        /// <summary>Re-applies the whitelist while the HUD is still settling (see the class' UpdateAfterChildren).</summary>
+        protected override void UpdateAfterChildren()
+        {
+            base.UpdateAfterChildren();
+
+            if (!hudSettling)
+                return;
+
+            watchHudContainers();
+            applyHudVisibilityFilter(false);
+
+            if (hudSettleStopwatch.ElapsedMilliseconds >= hudSettleMilliseconds)
+            {
+                hudSettling = false;
+                applyHudVisibilityFilter();
+            }
+        }
+
+        private void onHudComponentsLoaded(Drawable _) => applyHudVisibilityFilter(false);
 
         /// <summary>
         /// Applies the requested HUD visibility: whitelist mode (hide everything except the listed
         /// components). When no whitelist was requested every component is shown.
         /// </summary>
-        private void applyHudVisibilityFilter()
+        private void applyHudVisibilityFilter(bool log = true)
         {
             if (options.HudSpecified)
-                HudVisibilityFilter.ApplyWhitelist(HUDOverlay, options.HudComponents);
+                HudVisibilityFilter.ApplyWhitelist(HUDOverlay, options.HudComponents, log);
         }
 
         /// <summary>
@@ -393,13 +449,14 @@ namespace LazerRender
                     audioRemainder = desiredSamples - samplesPerChannel;
                     int audioBytesThisFrame = samplesPerChannel * audioChannels * sizeof(short);
 
-                    // The track's 0:00 strictly corresponds to gameplayTime == 0. Before that
-                    // (lead-in) output silence. After the replay completes, keep playing the music
-                    // (if the audio file has an unused tail) and fade it out with the same ramp the
+                    // The decoder takes the absolute track (source) position, which is the gameplay clock
+                    // time itself: beatmap time 0 is the start of the audio file. Before the track starts
+                    // (a negative lead-in) output silence. After the replay completes, keep playing the
+                    // music (if the audio file has an unused tail) and fade it out with the same ramp the
                     // video uses.
                     if (trackDecoder != null && gameplayTime >= 0)
                     {
-                        trackDecoder.Read(gameplayTime / (1000.0 * audioRate), trackBuffer, audioBytesThisFrame);
+                        trackDecoder.Read(gameplayTime / 1000.0, trackBuffer, audioBytesThisFrame);
 
                         if (replayCompleted)
                             applyGain(trackBuffer, audioBytesThisFrame, 1.0 - tailFade);

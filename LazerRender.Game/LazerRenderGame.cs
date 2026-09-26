@@ -373,7 +373,21 @@ namespace LazerRender
                 if (imported == null)
                     throw new InvalidOperationException(@"Skin import returned no result.");
 
-                imported.PerformRead(s => Console.WriteLine($@"Imported skin ""{s.Name}""."));
+                imported.PerformRead(s =>
+                {
+                    Console.WriteLine($@"Imported skin ""{s.Name}"".");
+
+                    // Machine-readable counterpart so the web service can store the engine's canonical
+                    // skin name (the skin.ini Name, which can differ from the archive/file name) instead
+                    // of guessing it from the upload's filename.
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    {
+                        type = @"import",
+                        kind = @"skin",
+                        name = s.Name,
+                        creator = s.Creator,
+                    }));
+                });
             }
             catch (Exception e)
             {
@@ -1071,6 +1085,25 @@ namespace LazerRender
             {
                 skinInfo = SkinManager.GetAllUsableSkins()
                     .FirstOrDefault(s => s.Value.Name.StartsWith(requested + @" [", StringComparison.OrdinalIgnoreCase));
+            }
+
+            // A skin whose skin.ini supplied its own name is stored as "<skin.ini name> [<archive>]",
+            // while the web service indexes skins by their archive (file) name. Match that trailing
+            // archive tag too, otherwise such a skin is never found and the default skin is used.
+            if (skinInfo == null)
+            {
+                skinInfo = SkinManager.GetAllUsableSkins()
+                    .FirstOrDefault(s => s.Value.Name.EndsWith($@"[{requested}]", StringComparison.OrdinalIgnoreCase));
+            }
+
+            // A skin exported by lazer is stored under its skin.ini name, while its archive is named
+            // "<name> (<creator>)" (that is <see cref="SkinInfo.ToString"/>). The service has
+            // historically indexed skins by that archive/FILE name, so accept it here as well. This
+            // also resolves rows imported before the service learned the engine's canonical name.
+            if (skinInfo == null)
+            {
+                skinInfo = SkinManager.GetAllUsableSkins()
+                    .FirstOrDefault(s => s.Value.ToString().Equals(requested, StringComparison.OrdinalIgnoreCase));
             }
 
             if (skinInfo == null)

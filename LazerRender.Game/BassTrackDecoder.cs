@@ -22,13 +22,23 @@ namespace LazerRender
         private const int channels = 2;
 
         private readonly string tempFilePath;
+        private readonly double rate;
+        private readonly bool adjustPitch;
         private int? mixerHandle;
         private int? sourceHandle;
 
-        private BassTrackDecoder(int mixerHandle, int sourceHandle, string tempFilePath)
+        /// <summary>Whether the source has been positioned for the current playback run.</summary>
+        private bool positioned;
+
+        /// <summary>The source time (seconds) the next read is expected to continue from.</summary>
+        private double expectedSourceSeconds;
+
+        private BassTrackDecoder(int mixerHandle, int sourceHandle, double rate, bool adjustPitch, string tempFilePath)
         {
             this.mixerHandle = mixerHandle;
             this.sourceHandle = sourceHandle;
+            this.rate = rate;
+            this.adjustPitch = adjustPitch;
             this.tempFilePath = tempFilePath;
         }
 
@@ -83,6 +93,9 @@ namespace LazerRender
                 }
             }
 
+            // BASS_MIXER_POSEX (MixerPositionEx) is deliberately not used: it only enables position
+            // *reporting* (ChannelGetPositionEx), it does not make seeking the mixer seek its sources.
+            // The source channel is positioned explicitly in Read instead.
             int mixer = BassMix.CreateMixerStream(frequency, channels, BassFlags.Decode | BassFlags.MixerNonStop);
 
             if (mixer == 0)
@@ -98,13 +111,28 @@ namespace LazerRender
                 return null;
             }
 
-            return new BassTrackDecoder(mixer, source, tempFilePath);
+            return new BassTrackDecoder(mixer, source, rate, adjustPitch, tempFilePath);
         }
 
         /// <summary>
-        /// Reads exactly <paramref name="byteCount"/> bytes of interleaved s16le stereo PCM for the
-        /// given track time, seeking the decode mixer first and padding any short reads with silence.
+        /// Reads exactly <paramref name="byteCount"/> bytes of interleaved s16le stereo PCM starting at
+        /// the given track time, padding any short read with silence.
         /// </summary>
+        /// <param name="seconds">Absolute track (source) position in seconds. Negative values produce
+        /// silence (the lead-in before the audio file starts).</param>
+        /// <remarks>
+        /// The source channel is positioned explicitly because a BASS mixer is a pull source:
+        /// <see cref="Bass.ChannelSetPosition"/> on the mixer only moves the mixer's own timeline and the
+        /// source keeps streaming from 0:00, which is what made a non-zero recording start (a skipped
+        /// intro) desync the music from the video. How it is positioned depends on the mod shape:
+        /// <list type="bullet">
+        /// <item>The plain stream and a pitch-preserving tempo stream (Daycore/Nightcore, DT/HT without
+        /// "adjust pitch") are seeked every read. That is exact and keeps the music locked to gameplay.</item>
+        /// <item>A pitch-adjusting <c>TempoFrequency</c> stream (DT/HT with "adjust pitch") re-warms its
+        /// resampler after every seek, so it is positioned once and then read straight through; seeking it
+        /// each frame produced an audible offset.</item>
+        /// </list>
+        /// </remarks>
         public void Read(double seconds, byte[] buffer, int byteCount)
         {
             int mixer = mixerHandle ?? 0;
@@ -115,8 +143,24 @@ namespace LazerRender
                 return;
             }
 
-            long position = Bass.ChannelSeconds2Bytes(mixer, seconds);
-            Bass.ChannelSetPosition(mixer, position);
+            if (adjustPitch)
+            {
+                double outputSeconds = byteCount / (double)(frequency * channels * sizeof(short));
+
+                // Position on the first read, or if the caller jumped somewhere unexpected. During normal
+                // playback the requested time matches where the previous read left off, so this is a no-op.
+                if (!positioned || Math.Abs(seconds - expectedSourceSeconds) > 0.5)
+                    seek(seconds);
+
+                positioned = true;
+
+                // A rate-adjusted stream advances through the source `rate` times faster than it produces output.
+                expectedSourceSeconds = seconds + outputSeconds * rate;
+            }
+            else
+            {
+                seek(seconds);
+            }
 
             int read = Bass.ChannelGetData(mixer, buffer, byteCount);
 
@@ -125,6 +169,18 @@ namespace LazerRender
 
             if (read < byteCount)
                 Array.Clear(buffer, read, byteCount - read);
+        }
+
+        /// <summary>
+        /// Moves the source channel to <paramref name="seconds"/> (source time). Falls back to the mixer
+        /// when the source handle is unavailable, which is only possible after <see cref="Dispose"/>.
+        /// </summary>
+        private void seek(double seconds)
+        {
+            if (sourceHandle is int source && source != 0)
+                BassMix.ChannelSetPosition(source, Bass.ChannelSeconds2Bytes(source, seconds), PositionFlags.Bytes);
+            else if (mixerHandle is int mixer && mixer != 0)
+                Bass.ChannelSetPosition(mixer, Bass.ChannelSeconds2Bytes(mixer, seconds));
         }
 
         public void Dispose()

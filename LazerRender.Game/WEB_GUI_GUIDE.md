@@ -68,6 +68,7 @@ Exactly one verb is required.
 | `--motion-blur <n>` | FFmpeg `tmix` frame count (0 = off, 3 = light, 5 = heavy) |
 | `--hud-scale <n>` | extra UI scale (default 1.0) |
 | `--disable-result-screen` | fade to black at the end of the replay instead of showing the results screen |
+| `--skip-intro` / `--no-skip-intro` | skip the beatmap's intro and start at the first object (default: `no-skip-intro`, so the intro before the first object is played like the audio track's opening) |
 | `--avatar-api-key <key>` | osu! API v2 token for the player avatar (public endpoint; a client-credentials token is fine) |
 | `--osu-user-token <token>` | osu! API v2 **user** access token that signs the engine in, enabling online beatmap leaderboards / the `scoreboard` element (needs the `public` scope; see §6) |
 | `--osu-user-token-expires-in <sec>` | validity of `--osu-user-token` (default 3600) |
@@ -98,6 +99,7 @@ A single JSON object. All keys are optional; omitted keys use the defaults below
   "comboColourNormalisation": 0.2,
   "hudVisibility": "always",
   "snakingIn": true, "snakingOut": true, "hitAnimations": true, "hitLighting": false,
+  "starFountains": false,
   "cursorTrail": true, "cursorRipples": false, "cursorSize": 1.0,
   "playfieldBorder": "none",
   "showClickMarkers": false, "showFrameMarkers": false,
@@ -105,6 +107,7 @@ A single JSON object. All keys are optional; omitted keys use the defaults below
   "replayAnalysisLength": 800,
   "motionBlur": 0,
   "disableResultScreen": false,
+  "skipIntro": false,
   "leaderboardScope": "global",
   "hud": ["hp", "combo", "score", "hiterror"]
 }
@@ -129,6 +132,7 @@ A single JSON object. All keys are optional; omitted keys use the defaults below
 | `snakingIn` / `snakingOut` | bool | — | true |
 | `hitAnimations` | bool | — | true |
 | `hitLighting` | bool | — | false |
+| `starFountains` | bool | — | false |
 | `cursorTrail` | bool | — | true |
 | `cursorRipples` | bool | — | false |
 | `cursorSize` | float | 0.1..2 | 1 |
@@ -140,6 +144,7 @@ A single JSON object. All keys are optional; omitted keys use the defaults below
 | `replayAnalysisLength` | int | 200..2000 | 800 |
 | `motionBlur` | int | 0..32 (0 = off) | 0 |
 | `disableResultScreen` | bool | — | false |
+| `skipIntro` | bool | — | false |
 | `leaderboardScope` | enum | `global` / `country` / `friend` / `team` (`country`/`friend` need supporter, `team` needs a team; `global` always works) | `global` |
 | `hud` | string[] | any of the HUD component keys (below); omit to show everything, `[]` to hide every HUD element | omitted |
 
@@ -195,7 +200,10 @@ o!rdr settings with no lazer HUD counterpart (Strain Graph, Slider Breaks) are n
 "Borders" maps to the existing `playfieldBorder` setting.
 
 When no skin is requested at all, the recorder uses the built-in osu! "argon" pro skin as its default
-(argon without the x300 hit popups) rather than plain argon.
+(argon without the x300 hit popups) rather than plain argon. `--skin` matches a skin's canonical name
+(the `skin.ini` `Name`, which may differ from the archive/file name); the web service stores that
+canonical name on import, and the engine also accepts the archive form `Name (Creator)` for skins
+exported by lazer.
 
 ---
 

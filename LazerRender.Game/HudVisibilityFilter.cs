@@ -105,7 +105,9 @@ namespace LazerRender
         /// match one of <paramref name="keepKeys"/>, leaving only the whitelisted elements visible.
         /// Fixed (non-skinnable) HUD controls such as the hold-to-quit button are always hidden.
         /// </summary>
-        public static void ApplyWhitelist(Drawable hudRoot, IReadOnlyCollection<string> keepKeys)
+        /// <param name="log">Whether to emit the summary log line. Repeated (per-frame) applications
+        /// during the HUD settle window pass <c>false</c> to avoid flooding the log.</param>
+        public static void ApplyWhitelist(Drawable hudRoot, IReadOnlyCollection<string> keepKeys, bool log = true)
         {
             var kept = new Dictionary<string, int>();
             var hidden = new Dictionary<string, int>();
@@ -151,7 +153,8 @@ namespace LazerRender
                 increment(hidden, d.GetType().Name);
             }
 
-            Logger.Log($@"HudVisibilityFilter (--hud): kept {format(kept)}; hid {format(hidden)}");
+            if (log)
+                Logger.Log($@"HudVisibilityFilter (--hud): kept {format(kept)}; hid {format(hidden)}");
         }
 
         private static string? matchAny(IReadOnlyCollection<string> keys, Drawable d)

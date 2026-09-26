@@ -42,8 +42,8 @@ public sealed class AssetImportRunner
         this.logger = logger;
     }
 
-    /// <summary>Runs an asset operation behind the shared render lock.</summary>
-    public async Task RunAsync(IReadOnlyList<string> args, CancellationToken ct)
+    /// <summary>Runs an asset operation behind the shared render lock. Returns the engine's stdout.</summary>
+    public async Task<string> RunAsync(IReadOnlyList<string> args, CancellationToken ct)
     {
         if (!await renderLock.Gate.WaitAsync(0, ct))
             throw new AssetImportBusyException();
@@ -58,6 +58,8 @@ public sealed class AssetImportRunner
 
             if (exitCode != 0)
                 throw new InvalidOperationException($"LazerRender exited with code {exitCode}: {stderr}");
+
+            return stdout;
         }
         finally
         {

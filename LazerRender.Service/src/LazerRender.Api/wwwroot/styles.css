@@ -97,7 +97,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 24px 20px 64px; }
 .two-col { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; align-items: start; }
 @media (max-width: 920px) { .two-col { grid-template-columns: 1fr; } }
 
-.field { display: block; margin-bottom: 14px; }
+.field { display: block; position: relative; margin-bottom: 14px; }
 .field > span { display: block; font-size: 0.82rem; color: var(--muted); margin-bottom: 6px; }
 
 input[type="text"], input[type="number"], input[type="file"], select {
@@ -118,13 +118,15 @@ input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); ou
 .row-end .field { flex: 1; min-width: 160px; }
 @media (max-width: 640px) { .row { flex-direction: column; gap: 0; } }
 
-.range { display: block; margin-bottom: 14px; }
-.range > span { display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--muted); margin-bottom: 6px; }
+.range { display: block; position: relative; margin-bottom: 14px; }
+.range > span { display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--muted); margin-bottom: 6px; padding-right: 22px; }
 .range output { color: var(--text); font-variant-numeric: tabular-nums; }
 input[type="range"] { width: 100%; accent-color: var(--accent); }
 
-.checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px 12px; }
-.check { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; cursor: pointer; }
+/* The reset arrow is absolutely positioned (below), so reserve a constant gutter for it. Otherwise
+   showing it would shrink the label's width, wrap long labels and change the row/card height. */
+.checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 12px; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; cursor: pointer; position: relative; padding-right: 24px; }
 .check input { accent-color: var(--accent); width: 16px; height: 16px; }
 
 .hint { margin: 12px 0 8px; }
@@ -314,20 +316,30 @@ th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: 
 .expanded-main .stat-grid { flex: 1; min-width: 0; margin: 0; }
 @media (max-width: 700px) { .expanded-main { flex-direction: column; } }
 
-/* Reset buttons */
-.field.has-reset { position: relative; }
+/* Reset buttons. They are absolutely positioned so appearing/disappearing never reflows the control
+   next to them (long labels used to wrap and grow the row when the arrow showed up). */
 .reset-btn {
   appearance: none;
   border: 0;
   background: transparent;
   color: var(--accent);
   font-size: 0.9rem;
+  line-height: 1;
   cursor: pointer;
-  padding: 2px 6px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   border-radius: 6px;
 }
 .reset-btn:hover { background: var(--accent-soft); }
-.check .reset-btn { margin-left: auto; }
+/* Author `display` beats the UA [hidden] rule, so re-assert it for the toggled (hidden) state. */
+.reset-btn[hidden] { display: none; }
+.field > .reset-btn { position: absolute; top: 0; right: 0; }
+.range > .reset-btn { position: absolute; top: 0; right: 0; }
+.check > .reset-btn { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
 
 /* Presets */
 .presets-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; }

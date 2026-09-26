@@ -248,6 +248,14 @@ namespace LazerRender
                         options.DisableResultScreen = false;
                         break;
 
+                    case @"--skip-intro":
+                        options.SkipIntro = true;
+                        break;
+
+                    case @"--no-skip-intro":
+                        options.SkipIntro = false;
+                        break;
+
                     case @"--leaderboard-scope":
                         options.LeaderboardScope = parseLeaderboardScope(value(++i));
                         break;
@@ -434,6 +442,10 @@ namespace LazerRender
                         options.DisableResultScreen = prop.Value.GetBoolean();
                         break;
 
+                    case @"skipIntro":
+                        options.SkipIntro = prop.Value.GetBoolean();
+                        break;
+
                     case @"leaderboardScope":
                         options.LeaderboardScope = parseLeaderboardScope(prop.Value.GetString());
                         break;
@@ -609,6 +621,8 @@ Render options:
                     scale setting (default: 1.0 = lazer-native size)
   --disable-result-screen  Fade to black at the end of the replay and stop
                     instead of transitioning to the results screen
+  --skip-intro      Fast-forward to the first object and drop the intro fragment
+                    before it (default: off, so the intro is played like the music)
   --leaderboard-scope <scope>  Which beatmap leaderboard to warm for the scoreboard:
                     global (default), country, friend or team. Mirrors the scope
                     a player can pick in song select; needs a user token to have

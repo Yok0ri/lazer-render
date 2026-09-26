@@ -141,6 +141,7 @@ namespace LazerRender
                     [@"always"] = HUDVisibilityMode.Always,
                 }),
             global("hitLighting", "hit-lighting", OsuSetting.HitLighting, SettingValueKind.Bool, false, @"Show hit lighting (click aftereffects)."),
+            global("starFountains", "star-fountains", OsuSetting.StarFountains, SettingValueKind.Bool, false, @"Show star fountains during kiais."),
 
             // --- osu! ruleset settings (OsuRulesetConfigManager) ---
             ruleset("snakingIn", "snaking-in", OsuRulesetSetting.SnakingInSliders, SettingValueKind.Bool, true, @"Snake sliders in."),

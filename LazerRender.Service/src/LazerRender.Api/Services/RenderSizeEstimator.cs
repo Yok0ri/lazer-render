@@ -69,7 +69,9 @@ public sealed class RenderSizeEstimator
                 double accuracy = root.TryGetProperty("accuracy", out var a) && a.TryGetDouble(out var av) ? av : 0;
                 string? mods = root.TryGetProperty("mods", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null;
 
-                return new ReplayRenderInfo(true, duration, rate, songLength, mods, accuracy, stars);
+                return new ReplayRenderInfo(
+                    true, duration, rate, songLength, mods, accuracy, stars,
+                    GetString(root, "title"), GetString(root, "artist"), GetString(root, "creator"), GetString(root, "version"));
             }
             catch (JsonException)
             {
@@ -79,6 +81,9 @@ public sealed class RenderSizeEstimator
 
         return null;
     }
+
+    private static string? GetString(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 }
 
 public sealed record ReplayRenderInfo(
@@ -88,4 +93,8 @@ public sealed record ReplayRenderInfo(
     double SongLengthSeconds,
     string? Mods,
     double? Accuracy,
-    double Stars);
+    double Stars,
+    string? Title = null,
+    string? Artist = null,
+    string? Creator = null,
+    string? Version = null);
