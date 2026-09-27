@@ -652,6 +652,7 @@ function expandedBody(job) {
   if (job.status === "failed") message = `<div class="error-box">${esc(job.errorMessage || "The render failed.")}</div>`;
   else if (job.status === "rejected") message = `<div class="error-box">${esc(job.errorMessage || "This render was rejected because it would exceed the size limit.")}</div>`;
   else if (job.status === "cancelled") message = `<p class="muted">This render was cancelled.</p>`;
+  else if (job.status === "removed") message = `<p class="muted">This render's result has been removed (retention expired or an admin purge).</p>`;
 
   const techOpen = state.techOpen.has(job.id) ? "open" : "";
   const download = job.resultAvailable
@@ -839,7 +840,7 @@ function applyExpansion(card, job) {
 async function loadJobs() {
   const data = await api("/api/v1/jobs?limit=100");
   state.jobs = data.items;
-  renderJobList($("jobs-list"), data.items.slice(0, 6), true);
+  renderJobList($("jobs-list"), data.items.slice(0, 10), true);
   renderJobList($("jobs-list-full"), data.items);
   updateQueueConfirmation();
 }
@@ -939,9 +940,14 @@ async function revokeUser(osuUserId) {
 }
 
 async function purge(target) {
-  if (!confirm(`Purge ${target} from the shared library?`)) return;
+  const what = target === "renders"
+    ? "all render history and result files"
+    : `${target} from the shared library`;
+  if (!confirm(`Purge ${what}?`)) return;
   try {
     await api(`/api/v1/admin/purge?target=${target}`, { method: "POST" });
+    // A renders purge clears the Jobs tab, so refresh the lists immediately.
+    await loadJobs();
     alert("Purge complete.");
   } catch (err) { alert(err.message); }
 }

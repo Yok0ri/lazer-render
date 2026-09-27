@@ -1,4 +1,5 @@
 using LazerRender.Api.Data;
+using LazerRender.Contracts;
 using Microsoft.EntityFrameworkCore;
 
 namespace LazerRender.Api.Services;
@@ -73,6 +74,11 @@ public sealed class RetentionSweeper : BackgroundService
 
             job.OutputPath = null;
             job.ResultSize = null;
+
+            // Surface the expiry in the UI (grey/red "removed" badge) instead of leaving a
+            // "completed" job with no download.
+            if (job.Status == JobStatus.Completed)
+                job.Status = JobStatus.Removed;
         }
 
         await db.SaveChangesAsync(ct);

@@ -92,8 +92,11 @@ public sealed class AdminController : ControllerBase
     [HttpPost("purge")]
     public async Task<IActionResult> Purge([FromQuery] string target, CancellationToken ct)
     {
+        if (target == "renders")
+            return await PurgeRendersAsync(ct);
+
         if (target is not ("beatmaps" or "skins" or "all"))
-            return BadRequest(new { error = "invalid_target", detail = "target must be beatmaps, skins or all." });
+            return BadRequest(new { error = "invalid_target", detail = "target must be beatmaps, skins, all or renders." });
 
         try
         {
@@ -105,6 +108,40 @@ public sealed class AdminController : ControllerBase
         }
 
         return Ok(new { purged = target });
+    }
+
+    /// <summary>
+    /// Deletes every render job row and its result file. Refused while any job is non-terminal so the
+    /// worker never has a row deleted out from under it.
+    /// </summary>
+    private async Task<IActionResult> PurgeRendersAsync(CancellationToken ct)
+    {
+        bool active = await db.Jobs.AnyAsync(
+            j => j.Status != JobStatus.Completed &&
+                 j.Status != JobStatus.Failed &&
+                 j.Status != JobStatus.Cancelled &&
+                 j.Status != JobStatus.Rejected &&
+                 j.Status != JobStatus.Removed,
+            ct);
+
+        if (active)
+            return Conflict(new ErrorResponse("busy", "A render is still active; purge renders once it has finished."));
+
+        var jobs = await db.Jobs.ToListAsync(ct);
+
+        foreach (var job in jobs)
+        {
+            storage.DeleteStagedReplay(job.Id);
+            storage.DeleteJobDirectory(job.Id);
+        }
+
+        db.Jobs.RemoveRange(jobs);
+        await db.SaveChangesAsync(ct);
+
+        storage.PurgeRenderData();
+
+        logger.LogInformation("Admin purged {Count} render(s).", jobs.Count);
+        return Ok(new { purged = "renders", count = jobs.Count });
     }
 
     [HttpGet("queue")]

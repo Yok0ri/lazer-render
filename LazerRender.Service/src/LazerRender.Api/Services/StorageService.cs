@@ -86,6 +86,25 @@ public sealed class StorageService
             Directory.Delete(path, recursive: true);
     }
 
+    /// <summary>
+    /// Empties the render result and working directories. Only safe when no render is in flight — the
+    /// caller enforces that. The uploads directory is deliberately left alone: an asset import may be
+    /// using it concurrently.
+    /// </summary>
+    public void PurgeRenderData()
+    {
+        ClearDirectory(ResultsDirectory);
+        ClearDirectory(JobsDirectory);
+    }
+
+    private static void ClearDirectory(string path)
+    {
+        if (Directory.Exists(path))
+            Directory.Delete(path, recursive: true);
+
+        Directory.CreateDirectory(path);
+    }
+
     private string Resolve(string configured, string fallback)
     {
         var basePath = string.IsNullOrWhiteSpace(configured) ? fallback : configured;

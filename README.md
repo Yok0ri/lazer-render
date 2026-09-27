@@ -130,11 +130,12 @@ goes to `LazerRender.Service/src/LazerRender.Api/data/` (gitignored).
   `Admin:BootstrapToken` to claim a fresh instance.
 - **Render queue** — upload an `.osr`, pick options, and a single serialized worker renders it with live
   progress. Job cards show the player and resolved map metadata; results download as
-  `lazerrender-video.mp4`.
+  `lazerrender-video.mp4`. Completed results are kept for `Quota:ResultRetentionDays` (default 7) before
+  the hourly sweeper deletes the file and marks the job `removed`.
 - **Skins & presets** — import `.osk` skins and save/reuse render presets.
-- **Admin** — allow/revoke users, purge the shared library, a "Render PC" hardware summary, and live
-  service/engine console logs. The logs are kept **in memory only**, redacted, and dropped when the panel
-  closes; set `LAZERRENDER_DEBUG=1` for verbose capture.
+- **Admin** — allow/revoke users, purge the shared library or the render history, a "Render PC"
+  hardware summary, and live service/engine console logs. The logs are kept **in memory only**,
+  redacted, and dropped when the panel closes; set `LAZERRENDER_DEBUG=1` for verbose capture.
 
 ## Deployment (quick guide)
 

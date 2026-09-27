@@ -204,6 +204,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .badge.queued { background: var(--accent-soft); color: var(--accent); }
 .badge.failed, .badge.rejected { background: var(--err-soft); color: var(--err); }
 .badge.cancelled { background: var(--border); color: var(--muted); }
+.badge.removed { background: var(--err-soft); color: var(--err); }
 
 .empty { text-align: center; color: var(--muted); padding: 24px; }
 
