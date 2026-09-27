@@ -107,12 +107,17 @@ async function loadMe() {
   }
 
   state.me = me;
-  showApp();
   renderUser();
   if (me.role === "admin") { $("admin-tab").hidden = false; initAdmin(); }
 
+  // The render-config defaults are the single source of truth for the form. Apply them before
+  // revealing the form so it never shows the static HTML placeholder values (which disagreed with
+  // the real defaults — e.g. 30 fps, a HUD-scale midpoint of 1.25, unchecked background toggles).
+  await loadDefaults();
+  showApp();
+
   // Non-critical data must never mask a successful authentication.
-  await Promise.allSettled([loadSkins(), loadPresets(), loadDefaults(), loadJobs()]);
+  await Promise.allSettled([loadSkins(), loadPresets(), loadJobs()]);
   startTimers();
 }
 
@@ -168,7 +173,11 @@ async function loadRenderPc(refresh = false) {
 async function loadDefaults() {
   try {
     state.defaults = await api("/api/v1/render-config/defaults");
-    syncResetButtons();
+
+    // Initialise the form from the server defaults. The HTML values are only a pre-JS placeholder;
+    // without this the page load and the per-control "reset to default" arrows disagreed, which is
+    // why a reload looked like it reset to values that were not the real defaults.
+    applyConfig(state.defaults);
   } catch { state.defaults = null; }
 }
 
@@ -350,8 +359,11 @@ function toCamel(kebab) {
 function applyConfig(config) {
   if (config.fps != null) $("fps").value = String(config.fps);
   if (config.width != null && config.height != null) {
-    const match = [`${config.width}x${config.height}`];
-    if ($(`#resolution option[value="${config.width}x${config.height}"]`)) $("resolution").value = `${config.width}x${config.height}`;
+    const value = `${config.width}x${config.height}`;
+    const resolution = $("resolution");
+    // $() is getElementById, so a compound selector like "#resolution option[...]" never matched;
+    // check the option list directly instead (this is why a preset's resolution never applied).
+    if (Array.from(resolution.options).some((option) => option.value === value)) resolution.value = value;
   }
   if (config.motionBlur != null) $("motion-blur").value = String(config.motionBlur);
   if (config.dimLevel != null) $("dim-level").value = String(config.dimLevel);
