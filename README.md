@@ -151,9 +151,21 @@ docker compose up -d --build               # host port 5180
 ```
 
 GPU passthrough uses render nodes only (`/dev/dri/renderD*`), so pass the node for the card you want
-(Linux/Windows with WSL2 GPU support; macOS has no GPU passthrough and can only run the service half).
+to (Linux/Windows with WSL2 GPU support; macOS has no GPU passthrough and can only run the service half).
 Data and the Data Protection key ring live in named volumes (`/app/data`, `/app/keys`). See
 `docker-compose.yml` for `.env` keys (`Osu__OAuth__ClientId`, `AllowedHosts`, `Proxy__KnownProxies`, …).
+
+### Podman (Linux)
+
+The image is OCI, so Podman runs the same artifact:
+
+```bash
+podman compose up -d --build               # or: podman-compose up -d --build
+```
+
+For an always-on host, `LazerRender.Service/deploy/podman/` ships **quadlet** units (rootless
+`systemd`), plus `podman run` instructions, SELinux and GPU notes. The build file is `Containerfile`
+(`Dockerfile` is a symlink to it), so `podman build -f Containerfile .` works too.
 
 ### Bare metal
 

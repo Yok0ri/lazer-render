@@ -1,0 +1,52 @@
+[Unit]
+Description=LazerRender render server (Podman quadlet)
+Documentation=https://github.com/Yok0ri/lazer-render
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+# Pin a released tag in production; ":latest" plus AutoUpdate=registry below tracks the newest.
+Image=ghcr.io/yok0ri/lazer-render:1.0.10
+ContainerName=lazerrender
+
+# Host port 5180 -> container 5080, matching the compose stack (so it cannot collide with a
+# service already on 5080).
+PublishPort=5180:5080
+
+# GPU passthrough: only the *render* node of the GPU you want to render on. See DEPLOYMENT.md §11;
+# map it on the host first with `ls -l /dev/dri/by-path/`. These nodes are mode crw-rw-rw-, so a
+# rootless user can open them without extra group membership.
+AddDevice=/dev/dri/renderD128
+
+# 4K RGBA frames are ~33 MB; the default 64 MB /dev/shm is too small once weston + the client share
+# buffers. 1 GB matches docker-compose.yml.
+ShmSize=1g
+
+# Named volumes (declared in the sibling .volume files). Data holds the SQLite DB, staged uploads,
+# results and the engine's Realm storage; keys is the Data Protection key ring that decrypts every
+# stored osu! credential. Never replace these with a bind mount for keys.
+Volume=lazerrender-data.volume:/app/data
+Volume=lazerrender-keys.volume:/app/keys
+
+# The same variables docker-compose.yml maps from .env. Create it next to this unit (see README).
+EnvironmentFile=%h/.config/lazerrender/.env
+Environment=ASPNETCORE_ENVIRONMENT=Production
+
+# Podman honours the image HEALTHCHECK too; the quadlet HealthCmd is explicit so `podman auto-update`
+# can restart a broken instance.
+HealthCmd=curl -fsS http://127.0.0.1:5080/health
+HealthInterval=30s
+HealthTimeout=5s
+HealthStartPeriod=30s
+HealthRetries=3
+
+# `podman auto-update` pulls a newer tag matching Image= and restarts.
+AutoUpdate=registry
+
+[Service]
+Restart=always
+# First start builds nothing but must pull a large image and initialise volumes; be generous.
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

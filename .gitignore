@@ -20,6 +20,7 @@
 !/.github/
 !/.gitignore
 !/.gitmodules
+!/Containerfile
 !/Directory.Build.props
 !/Dockerfile
 !/LICENSE
@@ -106,3 +107,4 @@ test_output/
 *.md
 !README.md
 !LazerRender.Game/WEB_GUI_GUIDE.md
+!LazerRender.Service/deploy/podman/README.md

@@ -1,6 +1,7 @@
-# LazerRender — compose stack for Portainer / docker compose.
+# LazerRender — compose stack for Portainer / docker compose / podman compose.
 #
 #   docker compose up -d --build
+#   podman compose up -d --build        # or: podman-compose up -d --build
 #
 # Create a .env beside this file (or paste the variables into the Portainer stack) with at least
 # OSU_CLIENT_ID, OSU_CLIENT_SECRET, OSU_REDIRECT_URI and ALLOWED_HOSTS.
@@ -12,7 +13,8 @@ services:
   lazerrender:
     build:
       context: .
-      dockerfile: Dockerfile
+      # The build file is named for Podman; Docker follows the committed Dockerfile symlink to it.
+      dockerfile: Containerfile
     image: lazerrender:latest
     container_name: lazerrender
     restart: unless-stopped

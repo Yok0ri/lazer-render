@@ -3,6 +3,13 @@ name: Publish container image
 # Builds the single image that holds both halves (service + prebuilt engine) and pushes it to
 # GitHub Container Registry. The engine build needs the pinned osu! submodule, so the checkout
 # below is recursive — that is the whole reason this cannot be built by Portainer from a plain clone.
+#
+# The image is OCI, so the artifact pushed here is the *same* one Podman pulls. Two jobs:
+#   * build-and-push  — the canonical build with Docker Buildx, published to GHCR (every push/tag);
+#   * verify-podman   — release-time check that the Containerfile also builds under the
+#                       Podman/Buildah toolchain (tags + manual dispatch only).
+# A second registry (Quay) is documented in LazerRender.Service/deploy/podman/README.md as an
+# optional mirror; it is not pushed here to keep a single published artifact per tag.
 
 on:
   push:
@@ -54,9 +61,37 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          # Podman-conventional filename; Docker follows the committed Dockerfile symlink, but we
+          # point at it explicitly so a checkout with symlinks disabled still builds.
+          file: Containerfile
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  verify-podman:
+    # The Docker job validates Containerfile on every push; the Podman toolchain build is the
+    # release-time check, so it does not double the build cost on ordinary main pushes.
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with the osu! submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Podman
+        run: |
+          if ! command -v podman >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y podman
+          fi
+          podman --version
+
+      # Build-only: confirms the same Containerfile builds with the Podman/Buildah toolchain, so a
+      # change that only works with BuildKit is caught. The published artifact stays the GHCR image.
+      # Rootful here so Podman uses overlay storage (rootless would need fuse-overlayfs on the runner).
+      - name: Build with Podman (Buildah toolchain)
+        run: sudo podman build -f Containerfile -t lazerrender:podman-verify .
