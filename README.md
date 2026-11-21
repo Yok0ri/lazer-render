@@ -133,6 +133,10 @@ goes to `LazerRender.Service/src/LazerRender.Api/data/` (gitignored).
   `lazerrender-video.mp4`. Completed results are kept for `Quota:ResultRetentionDays` (default 7) before
   the hourly sweeper deletes the file and marks the job `removed`.
 - **Skins & presets** — import `.osk` skins and save/reuse render presets.
+- **Live updates without constant polling** — the SPA refreshes the job list adaptively: every 2 s
+  while one of your renders is active, every 15 s when idle, and not at all while the tab is hidden
+  (it refreshes immediately on return, or when you open the Render/Jobs tab). An idle or backgrounded
+  page therefore does not stream requests through a tunnel or reverse proxy.
 - **Admin** — allow/revoke users, purge the shared library or the render history, a "Render PC"
   hardware summary, and live service/engine console logs. The logs are kept **in memory only**,
   redacted, and dropped when the panel closes; set `LAZERRENDER_DEBUG=1` for verbose capture.

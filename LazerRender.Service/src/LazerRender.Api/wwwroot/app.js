@@ -8,6 +8,8 @@ const state = {
   jobs: [],
   expandedJobs: new Set(),
   techOpen: new Set(),
+  activeTab: "render",
+  timersActive: false,
   listTimer: null,
   adminTimer: null,
   queueMessageJobId: null,
@@ -122,6 +124,7 @@ async function loadMe() {
 }
 
 function switchTab(name) {
+  state.activeTab = name;
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach((p) => (p.hidden = true));
   const panel = $("tab-" + name);
@@ -130,6 +133,11 @@ function switchTab(name) {
   if (name !== "jobs") collapseAllJobs();
   // Log lines are retained only while the Console logs panel is open.
   if (name !== "admin") closeLogs(true);
+
+  // The job list only matters on the Render/Jobs tabs: refresh immediately when entering one and
+  // re-evaluate the poll cadence. Entering Admin refreshes its panel instead.
+  if (name === "render" || name === "jobs") scheduleJobPoll(0);
+  else if (name === "admin" && state.me?.role === "admin") refreshAdmin().catch(() => {});
 }
 
 /* ---------- render pc ---------- */
@@ -498,6 +506,8 @@ async function submitRender(e) {
     fileInput.value = "";
     $("replay-meta").textContent = "";
     await loadJobs();
+    // Switch to the fast cadence immediately rather than waiting for a possibly-idle timer.
+    scheduleJobPoll(0);
   } catch (err) {
     setStatus("form-status", err.message, false);
   } finally {
@@ -1059,18 +1069,64 @@ async function closeLogs(silent = false) {
 
 /* ---------- timers ---------- */
 
+// The job list drives live render progress, so it has to refresh — but a fixed 2 s fetch of 100 jobs
+// forever is wasteful (and, behind a tunnel, generates constant request noise). Instead:
+//   * poll at 2 s only while something is queued/rendering (or just after an action);
+//   * back off to 15 s when this user has nothing in flight;
+//   * stop entirely while the browser tab is hidden, and refresh immediately on return;
+//   * only poll while the Render or Jobs tab is the one on screen.
+const JOB_POLL_ACTIVE_MS = 2000;
+const JOB_POLL_IDLE_MS = 15000;
+
 function startTimers() {
   stopTimers();
-  state.listTimer = setInterval(() => { loadJobs().catch(() => {}); }, 2000);
+  state.timersActive = true;
+  scheduleJobPoll(0);
+
   if (state.me?.role === "admin") {
-    state.adminTimer = setInterval(() => { refreshAdmin().catch(() => {}); }, 15000);
+    // The admin queue/user panel is only visible on the Admin tab; don't refresh it in the background.
+    state.adminTimer = setInterval(() => {
+      if (!document.hidden && state.activeTab === "admin") refreshAdmin().catch(() => {});
+    }, 15000);
   }
 }
 
 function stopTimers() {
-  [state.listTimer, state.adminTimer].forEach((t) => { if (t) clearInterval(t); });
+  state.timersActive = false;
+  clearTimeout(state.listTimer);
+  clearInterval(state.adminTimer);
   state.listTimer = state.adminTimer = null;
   stopLogPolling();
+}
+
+function scheduleJobPoll(delay) {
+  if (!state.timersActive) return;
+  clearTimeout(state.listTimer);
+  state.listTimer = setTimeout(pollJobs, delay);
+}
+
+async function pollJobs() {
+  state.listTimer = null;
+
+  if (!document.hidden && state.timersActive) {
+    try { await loadJobs(); } catch { /* transient; the next tick retries */ }
+  }
+
+  if (!state.timersActive) return; // logged out / stopped mid-request
+
+  const delay = nextJobPollDelay();
+  if (delay !== null) scheduleJobPoll(delay);
+}
+
+function nextJobPollDelay() {
+  if (document.hidden) return null; // resumed by the visibilitychange handler
+  if (state.activeTab !== "render" && state.activeTab !== "jobs") return JOB_POLL_IDLE_MS;
+  return hasActiveJob() ? JOB_POLL_ACTIVE_MS : JOB_POLL_IDLE_MS;
+}
+
+function hasActiveJob() {
+  return state.jobs.some((j) =>
+    j.status === "queued" || j.status === "claimed" || j.status === "rendering" || j.status === "finalizing");
 }
 
 /* ---------- wiring ---------- */
@@ -1138,6 +1194,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.querySelectorAll("[data-reset]").forEach((input) => {
     input.addEventListener("input", () => { syncRangeOutputs(); syncResetButtons(); syncHudMaster(); });
+  });
+
+  // Polling is paused while the tab is hidden; refresh once as soon as it is visible again.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && state.me) scheduleJobPoll(0);
   });
 
   loadMe();
